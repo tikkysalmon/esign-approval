@@ -271,13 +271,22 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
       .sort((a, b) => new Date(a.signed_at) - new Date(b.signed_at));
     const allSigned = allApprovers.every((a) => a.status === "signed");
 
-    const pdfBytes = await buildSignedPdf({
+    let pdfBytes = await buildSignedPdf({
       request: requestRow,
       files: requestRow.request_files,
       signedApprovers,
       getFileUrl: filesPublicUrl,
       getSignatureUrl: (path) => getPublicUrl(SIGNATURES_BUCKET, path),
     });
+
+    // สำหรับคำขอค่าใช้จ่าย: ประทับลายเซ็นจริงลงบนเส้น "ผู้อนุมัติ" ของฟอร์ม
+    // ใบเบิกเงิน/ใบเบิกเงินสดย่อย (หน้าแรกของเอกสาร) โดยตรง
+    if (requestRow.request_type === "expense") {
+      const mergedDoc = await PDFLib.PDFDocument.load(pdfBytes);
+      const sigArrayBuffer = await signatureBlob.arrayBuffer();
+      await stampApproverOnExpenseForm(mergedDoc, requestRow.expense_subtype, sigArrayBuffer, signedAt);
+      pdfBytes = await mergedDoc.save();
+    }
 
     const signedPdfPath = `${requestRow.id}/signed.pdf`;
     const { error: pdfUpErr } = await sb.storage.from(FILES_BUCKET).upload(signedPdfPath, new Blob([pdfBytes], { type: "application/pdf" }), {

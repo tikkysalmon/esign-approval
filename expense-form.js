@@ -5,6 +5,10 @@
 //
 // พิกัดทั้งหมดวัดจากไฟล์แม่แบบจริงด้วย PyMuPDF (หน่วย pt, จุดกำเนิดซ้ายบน
 // แล้วแปลงเป็นระบบพิกัด pdf-lib ที่จุดกำเนิดซ้ายล่างผ่าน toPageY)
+//
+// ทุกช่องที่พิมพ์ทับ (ชื่อ/วันที่) ต้องวาดกล่องสีขาวปิดเส้นประเดิมก่อน
+// (maskBox) แล้วค่อยพิมพ์ตัวหนังสือทับ ไม่งั้นจะเห็นเส้นประเดิมแทรกปนกับ
+// ตัวหนังสือใหม่ (เพราะเส้นประเป็นส่วนหนึ่งของภาพพื้นหลัง ไม่ใช่เส้นใต้ตัวอักษร)
 // ============================================================
 
 const TEMPLATE_PAGE_WIDTH = 595.5;
@@ -13,10 +17,8 @@ const TEMPLATE_PAGE_WIDTH = 595.5;
 const ADVANCE_CARD = {
   bgPath: "assets/expense-form-advance-bg.png",
   height: 396,
-  nameFitzY: 122,
-  nameX: 96,
-  dateFitzY: 122,
-  dateX: 432,
+  name: { maskX: 90, maskWidth: 148, maskFitzTop: 104, maskFitzBottom: 128, textX: 96, textFitzY: 121 },
+  date: { maskX: 426, maskWidth: 110, maskFitzTop: 104, maskFitzBottom: 128, textX: 432, textFitzY: 121 },
   colNoX: [35.6, 86.7],
   colDescX: [86.7, 465.2],
   colAmountX: [465.2, 559.9],
@@ -28,16 +30,17 @@ const ADVANCE_CARD = {
   ],
   totalRowFitzY: [270.24, 310.75],
   toPageY: (fitzY) => 396 - fitzY,
+  // ตำแหน่งเส้นเซ็น "ผู้อนุมัติ" (ฝั่งขวา) — ใช้ตอนประทับลายเซ็นจริงลงบนฟอร์ม
+  approverSigBox: { x: 390, right: 493, fitzTop: 296, fitzBottom: 342 },
+  approverDate: { maskX: 424, maskWidth: 78, maskFitzTop: 363, maskFitzBottom: 387, textX: 428, textFitzY: 380 },
 };
 
 // การ์ด "ใบเบิกเงินสดย่อย" ตัดจากครึ่งล่างของแม่แบบ (fitz y เดิม: 396-842.25)
 const PETTY_CASH_CARD = {
   bgPath: "assets/expense-form-pettycash-bg.png",
   height: 446.25,
-  nameFitzY: 517,
-  nameX: 92,
-  dateFitzY: 517,
-  dateX: 432,
+  name: { maskX: 86, maskWidth: 148, maskFitzTop: 499, maskFitzBottom: 523, textX: 92, textFitzY: 516 },
+  date: { maskX: 426, maskWidth: 110, maskFitzTop: 499, maskFitzBottom: 523, textX: 432, textFitzY: 516 },
   colNoX: [34.6, 85.7],
   colDescX: [85.7, 464.2],
   colAmountX: [464.2, 558.9],
@@ -50,6 +53,9 @@ const PETTY_CASH_CARD = {
   ],
   totalRowFitzY: [687.1, 744.1],
   toPageY: (fitzY) => 842.25 - fitzY,
+  // ตำแหน่งเส้นเซ็น "ผู้อนุมัติ" (ฝั่งขวา) — ใช้ตอนประทับลายเซ็นจริงลงบนฟอร์ม
+  approverSigBox: { x: 390, right: 493, fitzTop: 735, fitzBottom: 781 },
+  approverDate: { maskX: 424, maskWidth: 78, maskFitzTop: 802, maskFitzBottom: 826, textX: 428, textFitzY: 819 },
 };
 
 function bahtNumber(n) {
@@ -78,12 +84,29 @@ async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items }) {
   const page = outDoc.addPage([TEMPLATE_PAGE_WIDTH, card.height]);
   page.drawImage(bgImage, { x: 0, y: 0, width: TEMPLATE_PAGE_WIDTH, height: card.height });
 
+  const drawField = (field, text) => {
+    page.drawRectangle({
+      x: field.maskX,
+      y: card.toPageY(field.maskFitzBottom),
+      width: field.maskWidth,
+      height: field.maskFitzBottom - field.maskFitzTop,
+      color: rgb(1, 1, 1),
+    });
+    page.drawText(text, {
+      x: field.textX,
+      y: card.toPageY(field.textFitzY),
+      font: thaiFont,
+      size: 11,
+      color: rgb(0.1, 0.15, 0.2),
+    });
+  };
+
   const drawText = (text, x, fitzY, opts) => {
     page.drawText(text, { x, y: card.toPageY(fitzY), font: thaiFont, size: 11, color: rgb(0.1, 0.15, 0.2), ...opts });
   };
 
-  drawText(requesterName || "-", card.nameX, card.nameFitzY);
-  drawText(dateStr || "-", card.dateX, card.dateFitzY);
+  drawField(card.name, requesterName || "-");
+  drawField(card.date, dateStr || "-");
 
   let total = 0;
   items.slice(0, card.rowFitzY.length).forEach((item, i) => {
@@ -104,4 +127,55 @@ async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items }) {
   drawText(totalText, card.colAmountX[1] - 10 - totalWidth, totalFitzY, { size: 11 });
 
   return await outDoc.save();
+}
+
+/**
+ * ประทับลายเซ็นจริง (ของผู้อนุมัติ) ลงบนเส้น "ผู้อนุมัติ" ของฟอร์มใบเบิกเงิน/
+ * ใบเบิกเงินสดย่อยที่สร้างไว้แล้ว — ฟอร์มนี้ต้องเป็นหน้าแรก (page index 0)
+ * ของเอกสาร PDF ที่ merge เสร็จแล้ว (เพราะระบบใส่ฟอร์มนี้เป็นไฟล์แรกเสมอ)
+ *
+ * mergedDoc: PDFDocument (จาก PDFLib.PDFDocument.load ของไฟล์ที่ merge แล้ว)
+ * subtype: 'advance' | 'petty_cash'
+ * sigPngBytes: ArrayBuffer/Uint8Array ของรูปลายเซ็น (PNG)
+ * signedAtISO: เวลาที่เซ็น (ISO string)
+ */
+async function stampApproverOnExpenseForm(mergedDoc, subtype, sigPngBytes, signedAtISO) {
+  const { rgb } = PDFLib;
+  const card = subtype === "petty_cash" ? PETTY_CASH_CARD : ADVANCE_CARD;
+
+  mergedDoc.registerFontkit(window.fontkit);
+  const thaiFontBytes = await fetchArrayBuffer(THAI_FONT_PATH);
+  const thaiFont = await mergedDoc.embedFont(thaiFontBytes, { subset: true });
+
+  const page = mergedDoc.getPage(0);
+  const sigImage = await mergedDoc.embedPng(sigPngBytes);
+
+  const box = card.approverSigBox;
+  const maxWidth = box.right - box.x;
+  const maxHeight = box.fitzBottom - box.fitzTop;
+  const scaled = sigImage.scaleToFit(maxWidth, maxHeight);
+  const sigYTop = card.toPageY(box.fitzTop);
+  page.drawImage(sigImage, {
+    x: box.x + (maxWidth - scaled.width) / 2,
+    y: sigYTop - scaled.height,
+    width: scaled.width,
+    height: scaled.height,
+  });
+
+  const dateField = card.approverDate;
+  const dateText = new Date(signedAtISO).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
+  page.drawRectangle({
+    x: dateField.maskX,
+    y: card.toPageY(dateField.maskFitzBottom),
+    width: dateField.maskWidth,
+    height: dateField.maskFitzBottom - dateField.maskFitzTop,
+    color: rgb(1, 1, 1),
+  });
+  page.drawText(dateText, {
+    x: dateField.textX,
+    y: card.toPageY(dateField.textFitzY),
+    font: thaiFont,
+    size: 10,
+    color: rgb(0.1, 0.15, 0.2),
+  });
 }
