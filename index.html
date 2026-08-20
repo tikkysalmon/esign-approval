@@ -59,13 +59,25 @@
         <label for="req-title">หัวข้อ</label>
         <input type="text" id="req-title" placeholder="เช่น ขออนุมัติซื้ออุปกรณ์สำนักงาน" />
 
+        <label for="req-requester">ชื่อผู้เบิก / ผู้ขออนุมัติ</label>
+        <input type="text" id="req-requester" placeholder="เช่น มายด์" />
+
         <label for="req-desc">รายละเอียด</label>
         <textarea id="req-desc" placeholder="อธิบายรายละเอียดคำขอ"></textarea>
 
-        <label for="req-amount">จำนวนเงิน (บาท)</label>
-        <input type="number" id="req-amount" placeholder="0.00" min="0" step="0.01" />
+        <div id="amount-block">
+          <label for="req-amount">จำนวนเงิน (บาท)</label>
+          <input type="number" id="req-amount" placeholder="0.00" min="0" step="0.01" />
+        </div>
 
-        <label>แนบไฟล์ PDF (แนบได้หลายไฟล์)</label>
+        <div id="expense-items-block" style="display:none;">
+          <label>รายการเบิก (ระบบจะสร้างใบเบิกเงิน/ใบเบิกเงินสดย่อยให้อัตโนมัติจากรายการนี้)</label>
+          <div id="expense-items-list"></div>
+          <button class="btn-secondary" type="button" id="add-item-row-btn" style="margin-top:8px;">+ เพิ่มรายการ</button>
+          <div style="text-align:right; margin-top:10px; font-weight:600;">รวมจำนวนเงิน: <span id="expense-items-total">฿0.00</span></div>
+        </div>
+
+        <label>แนบไฟล์ PDF เพิ่มเติม (ถ้ามี — เช่นใบเสร็จ, ใบเสนอราคา)</label>
         <div class="file-drop" id="file-drop">📎 คลิกเพื่อเลือกไฟล์ PDF หรือลากไฟล์มาวางที่นี่</div>
         <input type="file" id="file-input" accept="application/pdf" multiple style="display:none;" />
         <div class="file-list" id="file-list"></div>
@@ -118,7 +130,11 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="lib/pdf-lib.min.js"></script>
+<script src="lib/fontkit.umd.min.js"></script>
 <script src="config.js"></script>
+<script src="pdf-tools.js"></script>
+<script src="expense-form.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

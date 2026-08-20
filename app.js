@@ -10,6 +10,7 @@ const sb = window.supabase.createClient(
 const FILES_BUCKET = "esign-files";
 
 let selectedFiles = []; // File[]
+let expenseItems = []; // [{ description, amount }]
 let selectedApproverIds = new Set();
 let rosterCache = []; // approvers_roster rows (active only, for select)
 let rosterAllCache = []; // approvers_roster rows (all, for management table)
@@ -79,6 +80,8 @@ function initAppData() {
 }
 
 initAppData();
+expenseItems = [{ description: "", amount: "" }];
+renderExpenseItems();
 
 // ---------- ฟอร์มสร้างคำขอ: ประเภทคำขอ / ประเภทค่าใช้จ่าย (radio pill) ----------
 
@@ -103,8 +106,54 @@ function setupPillGroup(groupId, onChange) {
 setupPillGroup("request-type-group", (input) => {
   const isExpense = input.value === "expense";
   document.getElementById("expense-subtype-block").style.display = isExpense ? "block" : "none";
+  document.getElementById("expense-items-block").style.display = isExpense ? "block" : "none";
+  document.getElementById("amount-block").style.display = isExpense ? "none" : "block";
+  if (isExpense && !expenseItems.length) addExpenseItemRow();
 });
 setupPillGroup("expense-subtype-group");
+
+// ---------- ฟอร์มสร้างคำขอ: รายการเบิก (เฉพาะประเภทค่าใช้จ่าย) ----------
+
+function addExpenseItemRow() {
+  expenseItems.push({ description: "", amount: "" });
+  renderExpenseItems();
+}
+
+function renderExpenseItems() {
+  const el = document.getElementById("expense-items-list");
+  el.innerHTML = "";
+  expenseItems.forEach((item, idx) => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex; gap:8px; margin-bottom:8px; align-items:center;";
+    row.innerHTML = `
+      <input type="text" placeholder="รายละเอียด" data-field="description" style="flex:2;" value="${item.description.replace(/"/g, "&quot;")}" />
+      <input type="number" placeholder="จำนวนเงิน" min="0" step="0.01" data-field="amount" style="flex:1;" value="${item.amount}" />
+      <button class="btn-ghost" type="button" data-remove>ลบ</button>
+    `;
+    row.querySelector('[data-field="description"]').addEventListener("input", (e) => {
+      expenseItems[idx].description = e.target.value;
+    });
+    row.querySelector('[data-field="amount"]').addEventListener("input", (e) => {
+      expenseItems[idx].amount = e.target.value;
+      updateExpenseItemsTotal();
+    });
+    row.querySelector("[data-remove]").addEventListener("click", () => {
+      expenseItems.splice(idx, 1);
+      if (!expenseItems.length) expenseItems.push({ description: "", amount: "" });
+      renderExpenseItems();
+      updateExpenseItemsTotal();
+    });
+    el.appendChild(row);
+  });
+  updateExpenseItemsTotal();
+}
+
+function updateExpenseItemsTotal() {
+  const total = expenseItems.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+  document.getElementById("expense-items-total").textContent = baht(total);
+}
+
+document.getElementById("add-item-row-btn").addEventListener("click", addExpenseItemRow);
 
 // ---------- ฟอร์มสร้างคำขอ: แนบไฟล์ PDF ----------
 
@@ -200,13 +249,23 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
   const typeInput = document.querySelector('#request-type-group input:checked');
   const subtypeInput = document.querySelector('#expense-subtype-group input:checked');
   const title = document.getElementById("req-title").value.trim();
+  const requesterName = document.getElementById("req-requester").value.trim();
   const description = document.getElementById("req-desc").value.trim();
   const amountRaw = document.getElementById("req-amount").value;
+  const isExpense = typeInput && typeInput.value === "expense";
+
+  const cleanItems = isExpense
+    ? expenseItems
+        .map((it) => ({ description: it.description.trim(), amount: Number(it.amount) || 0 }))
+        .filter((it) => it.description && it.amount > 0)
+    : [];
 
   if (!typeInput) return showNewRequestError("กรุณาเลือกประเภทคำขอ");
-  if (typeInput.value === "expense" && !subtypeInput) return showNewRequestError("กรุณาเลือกประเภทค่าใช้จ่าย");
+  if (isExpense && !subtypeInput) return showNewRequestError("กรุณาเลือกประเภทค่าใช้จ่าย");
   if (!title) return showNewRequestError("กรุณากรอกหัวข้อ");
-  if (!selectedFiles.length) return showNewRequestError("กรุณาแนบไฟล์ PDF อย่างน้อย 1 ไฟล์");
+  if (!requesterName) return showNewRequestError("กรุณากรอกชื่อผู้เบิก/ผู้ขออนุมัติ");
+  if (isExpense && !cleanItems.length) return showNewRequestError("กรุณากรอกรายการเบิกอย่างน้อย 1 รายการ (มีทั้งรายละเอียดและจำนวนเงิน)");
+  if (!isExpense && !selectedFiles.length) return showNewRequestError("กรุณาแนบไฟล์ PDF อย่างน้อย 1 ไฟล์");
   if (!selectedApproverIds.size) return showNewRequestError("กรุณาเลือกผู้บริหารอย่างน้อย 1 คน");
 
   const btn = document.getElementById("submit-request-btn");
@@ -214,23 +273,51 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
   btn.textContent = "กำลังบันทึก...";
 
   try {
+    const computedTotal = cleanItems.reduce((sum, it) => sum + it.amount, 0);
     const { data: reqRow, error: reqErr } = await sb
       .from("requests")
       .insert({
         request_type: typeInput.value,
-        expense_subtype: typeInput.value === "expense" ? subtypeInput.value : null,
+        expense_subtype: isExpense ? subtypeInput.value : null,
         title,
+        requester_name: requesterName,
         description: description || null,
-        amount: amountRaw ? Number(amountRaw) : null,
+        amount: isExpense ? computedTotal : amountRaw ? Number(amountRaw) : null,
+        expense_items: cleanItems,
       })
       .select()
       .single();
     if (reqErr) throw reqErr;
     const requestId = reqRow.id;
 
+    let sortOrder = 0;
+
+    if (isExpense) {
+      const formLabel = subtypeInput.value === "petty_cash" ? "ใบเบิกเงินสดย่อย" : "ใบเบิกเงิน";
+      const dateStr = new Date().toLocaleDateString("th-TH", { dateStyle: "long" });
+      const formPdfBytes = await buildExpenseFormPdf({
+        subtype: subtypeInput.value,
+        requesterName,
+        dateStr,
+        items: cleanItems,
+      });
+      const formPath = `${requestId}/${Date.now()}_0_${sanitizeForStorageKey(formLabel + ".pdf")}`;
+      const { error: formUpErr } = await sb.storage
+        .from(FILES_BUCKET)
+        .upload(formPath, new Blob([formPdfBytes], { type: "application/pdf" }), { contentType: "application/pdf" });
+      if (formUpErr) throw formUpErr;
+      const { error: formRowErr } = await sb.from("request_files").insert({
+        request_id: requestId,
+        file_name: formLabel + ".pdf",
+        storage_path: formPath,
+        sort_order: sortOrder++,
+      });
+      if (formRowErr) throw formRowErr;
+    }
+
     for (let i = 0; i < selectedFiles.length; i++) {
       const f = selectedFiles[i];
-      const path = `${requestId}/${Date.now()}_${i}_${sanitizeForStorageKey(f.name)}`;
+      const path = `${requestId}/${Date.now()}_${sortOrder}_${sanitizeForStorageKey(f.name)}`;
       const { error: upErr } = await sb.storage.from(FILES_BUCKET).upload(path, f, {
         contentType: "application/pdf",
       });
@@ -239,7 +326,7 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         request_id: requestId,
         file_name: f.name,
         storage_path: path,
-        sort_order: i,
+        sort_order: sortOrder++,
       });
       if (fileRowErr) throw fileRowErr;
     }
@@ -294,6 +381,7 @@ document.getElementById("create-another-btn").addEventListener("click", () => {
 
 function resetNewRequestForm() {
   document.getElementById("req-title").value = "";
+  document.getElementById("req-requester").value = "";
   document.getElementById("req-desc").value = "";
   document.getElementById("req-amount").value = "";
   document.querySelectorAll('#request-type-group .radio-pill, #expense-subtype-group .radio-pill').forEach((p) =>
@@ -301,8 +389,12 @@ function resetNewRequestForm() {
   );
   document.querySelectorAll('#request-type-group input, #expense-subtype-group input').forEach((i) => (i.checked = false));
   document.getElementById("expense-subtype-block").style.display = "none";
+  document.getElementById("expense-items-block").style.display = "none";
+  document.getElementById("amount-block").style.display = "block";
   selectedFiles = [];
   renderFileList();
+  expenseItems = [{ description: "", amount: "" }];
+  renderExpenseItems();
   loadApproverSelect();
 }
 
@@ -343,7 +435,7 @@ function renderRequestItem(req) {
     <div class="req-head">
       <div>
         <div class="req-title">${req.title}</div>
-        <div class="req-meta">${requestTypeLabel(req)} · สร้างเมื่อ ${formatDateTime(req.created_at)}</div>
+        <div class="req-meta">${requestTypeLabel(req)}${req.requester_name ? " · ผู้เบิก " + req.requester_name : ""} · สร้างเมื่อ ${formatDateTime(req.created_at)}</div>
       </div>
       <div class="req-amount">${baht(req.amount)}<br/>${pillHtml}</div>
     </div>
