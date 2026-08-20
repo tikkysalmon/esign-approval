@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>เซ็นเอกสารอนุมัติ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="loading-screen" class="center-wrap">
+  <div class="spinner-text">กำลังโหลดเอกสาร...</div>
+</div>
+
+<div id="error-screen" class="center-wrap" style="display:none;">
+  <div class="card">
+    <h2>ไม่พบเอกสาร</h2>
+    <p id="error-text" class="hint">ลิงก์นี้อาจไม่ถูกต้องหรือถูกลบไปแล้ว กรุณาติดต่อผู้ที่ส่งลิงก์นี้ให้คุณ</p>
+  </div>
+</div>
+
+<div id="already-signed-screen" class="center-wrap" style="display:none;">
+  <div class="card">
+    <h2>✅ คุณเซ็นเอกสารนี้แล้ว</h2>
+    <p class="hint" id="already-signed-text"></p>
+    <a id="already-signed-download" href="#" target="_blank" class="btn-primary" style="display:none; text-decoration:none; margin-top:10px; display:inline-block;">📥 ดาวน์โหลด PDF ที่เซ็นแล้ว</a>
+  </div>
+</div>
+
+<div id="sign-screen" style="display:none;">
+  <main style="max-width: 640px;">
+    <div class="card">
+      <h2 id="sign-req-title"></h2>
+      <div class="hint" id="sign-req-meta"></div>
+      <p id="sign-req-desc" class="hint" style="margin-top:10px;"></p>
+      <div id="sign-req-amount" style="margin-top:10px; font-weight:600;"></div>
+
+      <label style="margin-top:20px;">ไฟล์เอกสารที่แนบมา</label>
+      <div id="sign-file-list"></div>
+
+      <div class="hint" id="sign-progress-hint" style="margin-top:14px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>ยืนยันตัวตนผู้เซ็น</h2>
+      <label for="approver-select">ชื่อ - ตำแหน่งของท่าน</label>
+      <select id="approver-select"></select>
+      <div class="hint">ถ้าชื่อ/ตำแหน่งไม่ตรง เลือกจากรายการใหม่ได้ก่อนเซ็น</div>
+
+      <label style="margin-top:20px;">วาดลายเซ็นของท่านในกรอบด้านล่าง</label>
+      <canvas id="sig-pad"></canvas>
+      <div class="sig-actions">
+        <button class="btn-ghost" id="clear-sig-btn" type="button">ล้างลายเซ็น</button>
+      </div>
+
+      <div id="sign-error" class="error-msg" style="display:none;"></div>
+      <button class="btn-primary" id="confirm-sign-btn" style="width:100%; margin-top:20px;">ยืนยันเซ็นเอกสาร</button>
+    </div>
+  </main>
+</div>
+
+<div id="success-screen" class="center-wrap" style="display:none;">
+  <div class="card">
+    <h2>✅ เซ็นเอกสารเรียบร้อย</h2>
+    <p class="hint" id="success-text"></p>
+    <a id="success-download" href="#" target="_blank" class="btn-primary" style="text-decoration:none; margin-top:10px; display:inline-block;">📥 ดาวน์โหลด PDF ที่เซ็นแล้ว</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="lib/pdf-lib.min.js"></script>
+<script src="lib/fontkit.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="pdf-tools.js"></script>
+<script src="sign.js"></script>
+</body>
+</html>

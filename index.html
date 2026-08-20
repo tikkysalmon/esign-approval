@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ระบบขออนุมัติเอกสาร</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app-screen">
+  <header class="topbar">
+    <div class="brand">📝 ระบบขออนุมัติเอกสาร</div>
+    <div class="user-box">
+      <span style="color:var(--warning);">โหมดทดสอบ — ยังไม่มีระบบล็อกอิน</span>
+    </div>
+  </header>
+
+  <main>
+    <nav class="tabs">
+      <button class="tab active" data-tab="new-request">➕ สร้างคำขอใหม่</button>
+      <button class="tab" data-tab="request-list">📋 รายการคำขอ</button>
+      <button class="tab" data-tab="roster">👤 จัดการผู้บริหาร</button>
+    </nav>
+
+    <!-- TAB: สร้างคำขอใหม่ -->
+    <section id="tab-new-request" class="tab-panel">
+      <div class="card">
+        <h2>สร้างคำขออนุมัติ</h2>
+
+        <label>ประเภทคำขอ</label>
+        <div class="radio-group" id="request-type-group">
+          <label class="radio-pill" data-value="quotation">
+            <input type="radio" name="request_type" value="quotation" />
+            ใบเสนอราคา
+          </label>
+          <label class="radio-pill" data-value="expense">
+            <input type="radio" name="request_type" value="expense" />
+            ค่าใช้จ่าย
+          </label>
+        </div>
+
+        <div id="expense-subtype-block" style="display:none;">
+          <label>ประเภทค่าใช้จ่าย</label>
+          <div class="radio-group" id="expense-subtype-group">
+            <label class="radio-pill" data-value="advance">
+              <input type="radio" name="expense_subtype" value="advance" />
+              เบิกเงิน
+            </label>
+            <label class="radio-pill" data-value="petty_cash">
+              <input type="radio" name="expense_subtype" value="petty_cash" />
+              เบิกเงินสดย่อย
+            </label>
+          </div>
+        </div>
+
+        <label for="req-title">หัวข้อ</label>
+        <input type="text" id="req-title" placeholder="เช่น ขออนุมัติซื้ออุปกรณ์สำนักงาน" />
+
+        <label for="req-desc">รายละเอียด</label>
+        <textarea id="req-desc" placeholder="อธิบายรายละเอียดคำขอ"></textarea>
+
+        <label for="req-amount">จำนวนเงิน (บาท)</label>
+        <input type="number" id="req-amount" placeholder="0.00" min="0" step="0.01" />
+
+        <label>แนบไฟล์ PDF (แนบได้หลายไฟล์)</label>
+        <div class="file-drop" id="file-drop">📎 คลิกเพื่อเลือกไฟล์ PDF หรือลากไฟล์มาวางที่นี่</div>
+        <input type="file" id="file-input" accept="application/pdf" multiple style="display:none;" />
+        <div class="file-list" id="file-list"></div>
+
+        <label>เลือกผู้บริหารที่ต้องเซ็นอนุมัติ</label>
+        <div class="checkbox-group" id="approver-select-group"></div>
+        <div class="hint" id="approver-select-hint">ยังไม่มีรายชื่อผู้บริหารในระบบ — ไปที่แท็บ "จัดการผู้บริหาร" เพื่อเพิ่มก่อน</div>
+
+        <div id="new-request-error" class="error-msg" style="display:none;"></div>
+        <button class="btn-primary" id="submit-request-btn" style="width:100%; margin-top:18px;">ยืนยันสร้างคำขอ</button>
+      </div>
+
+      <div class="card" id="result-card" style="display:none;">
+        <h2>✅ สร้างคำขอสำเร็จ</h2>
+        <p class="hint">คัดลอกลิงก์ด้านล่างส่งให้ผู้บริหารแต่ละท่านเพื่อเปิดดูและเซ็นอนุมัติ</p>
+        <div id="result-links"></div>
+        <button class="btn-secondary" id="create-another-btn" style="margin-top:10px;">สร้างคำขอใหม่อีกรายการ</button>
+      </div>
+    </section>
+
+    <!-- TAB: รายการคำขอ -->
+    <section id="tab-request-list" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h2>รายการคำขอทั้งหมด</h2>
+        <div id="request-list-body">
+          <div class="empty-state">กำลังโหลด...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: จัดการผู้บริหาร -->
+    <section id="tab-roster" class="tab-panel" style="display:none;">
+      <div class="card">
+        <h2>เพิ่มผู้บริหาร</h2>
+        <label for="roster-name">ชื่อ-นามสกุล</label>
+        <input type="text" id="roster-name" placeholder="เช่น คุณสมชาย ใจดี" />
+        <label for="roster-position">ตำแหน่ง</label>
+        <input type="text" id="roster-position" placeholder="เช่น กรรมการผู้จัดการ" />
+        <div id="roster-error" class="error-msg" style="display:none;"></div>
+        <button class="btn-primary" id="add-roster-btn" style="margin-top:14px;">เพิ่มรายชื่อ</button>
+      </div>
+      <div class="card">
+        <h2>รายชื่อผู้บริหารทั้งหมด</h2>
+        <div id="roster-table-body">
+          <div class="empty-state">กำลังโหลด...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
