@@ -15,16 +15,14 @@ function normalizeThai(s) {
 }
 
 /**
- * ลองหาเลขที่เอกสาร (เช่น "P00001" จาก "ใบสั่งซื้อ #P00001") จากหน้าแรกของไฟล์
+ * ลองหาเลขที่เอกสาร (เช่น "P00001" จาก "ใบสั่งซื้อ #P00001") จากหน้าที่ระบุ
  * ใช้รูปแบบเลข "#XXXXX" หรือ "PO XXXXX" เป็นตัวจับ — ไม่พึ่งข้อความภาษาไทยที่หน้าฟอร์ม
  * แต่ละบริษัทเขียนไม่เหมือนกัน (และบางทีสระผสมเพี้ยนตอนแตกไฟล์) จึงมั่นใจกว่า
- * bytes: ArrayBuffer ของไฟล์ PDF
  * คืนค่า string (เช่น "P00001") หรือ null ถ้าหาไม่เจอ
  */
-export async function detectDocumentNumber(bytes) {
+async function extractDocumentNumberFromPage(pdfDoc, pageNumInFile) {
   try {
-    const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
-    const page = await doc.getPage(1);
+    const page = await pdfDoc.getPage(pageNumInFile);
     const content = await page.getTextContent();
     const text = content.items.map((it) => it.str).join(" ");
 
@@ -33,6 +31,21 @@ export async function detectDocumentNumber(bytes) {
     m = text.match(/\bPO[\s:#-]*([0-9][\w\-\/]{3,})/i);
     if (m) return "PO" + m[1];
     return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * เหมือน extractDocumentNumberFromPage แต่รับไฟล์ดิบ (ยังไม่โหลด) ใช้ตอนเพิ่งแนบไฟล์
+ * ใหม่แล้วยังไม่มี pdf.js document object อยู่ในมือ — เช็คแค่หน้าแรกพอ (ทั่วไปเลขที่
+ * เอกสารจะอยู่หน้าแรกของ "ไฟล์เดี่ยวๆ" 1 เอกสาร/1 ไฟล์)
+ * bytes: ArrayBuffer ของไฟล์ PDF
+ */
+export async function detectDocumentNumber(bytes) {
+  try {
+    const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    return await extractDocumentNumberFromPage(doc, 1);
   } catch {
     return null;
   }
@@ -101,12 +114,16 @@ async function findTextAnchorRatio(pdfDoc, pageNumInFile, searchText) {
 export async function createPdfPageViewer(fileEls, items, getBytes, onPageRendered) {
   const flatPages = []; // { pdfDoc, pageNumInFile, fileIndex }
   const lastPageIndexPerFile = []; // lastPageIndexPerFile[fileIndex] = flatIndex ของหน้าสุดท้ายของไฟล์นั้น
+  const pageIndicesPerFile = []; // pageIndicesPerFile[fileIndex] = [flatIndex, ...] ทุกหน้าของไฟล์นั้น
   for (let fileIndex = 0; fileIndex < items.length; fileIndex++) {
     const bytes = await getBytes(items[fileIndex]);
     const pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const indices = [];
     for (let p = 1; p <= pdfDoc.numPages; p++) {
       flatPages.push({ pdfDoc, pageNumInFile: p, fileIndex });
+      indices.push(flatPages.length - 1);
     }
+    pageIndicesPerFile.push(indices);
     lastPageIndexPerFile.push(flatPages.length - 1);
   }
 
@@ -151,11 +168,17 @@ export async function createPdfPageViewer(fileEls, items, getBytes, onPageRender
     getCanvasSize: () => ({ width: canvasWidth, height: canvasHeight }),
     getFileCount: () => items.length,
     getLastPageIndexOfFile: (fileIndex) => lastPageIndexPerFile[fileIndex],
+    getPageIndicesForFile: (fileIndex) => pageIndicesPerFile[fileIndex] || [],
     getFileIndexOfPage: (pageIndex) => flatPages[pageIndex]?.fileIndex,
     findTextAnchorOnPage: (pageIndex, searchText) => {
       const p = flatPages[pageIndex];
       if (!p) return Promise.resolve(null);
       return findTextAnchorRatio(p.pdfDoc, p.pageNumInFile, searchText);
+    },
+    detectDocumentNumberOnPage: (pageIndex) => {
+      const p = flatPages[pageIndex];
+      if (!p) return Promise.resolve(null);
+      return extractDocumentNumberFromPage(p.pdfDoc, p.pageNumInFile);
     },
   };
 }

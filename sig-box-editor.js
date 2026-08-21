@@ -1,9 +1,11 @@
 // ============================================================
 // ตัวแก้ไขตำแหน่งกรอบลายเซ็น — ใช้ฝั่งพนักงานตอนสร้างคำขอ (index.html)
 // วางกรอบลายเซ็นแยกต่างหากให้ผู้อนุมัติแต่ละคนได้ ก่อนส่งลิงก์ไปให้เซ็น
-// ผู้อนุมัติ 1 คน เซ็นครั้งเดียว แต่ลายเซ็นจะไปปรากฏบน "ทุกไฟล์" ที่แนบมา —
-// จึงสร้างกรอบให้อัตโนมัติ 1 กรอบ/1 ไฟล์ (ที่หน้าสุดท้ายของแต่ละไฟล์) ทันทีที่
-// เลือกผู้อนุมัติคนนั้น แล้วให้ปรับตำแหน่งแต่ละกรอบเพิ่มเติมได้ถ้าต้องการ
+// ผู้อนุมัติ 1 คน เซ็นครั้งเดียว แต่ลายเซ็นจะไปปรากฏบน "ทุกไฟล์/ทุกเอกสาร" ที่แนบมา —
+// จึงสร้างกรอบให้อัตโนมัติทันทีที่เลือกผู้อนุมัติคนนั้น โดยไล่ดูทุกหน้าของแต่ละไฟล์
+// เช็คเลขที่เอกสาร ถ้าไฟล์เดียวมีหลาย PO ปนกัน (เลขไม่ซ้ำกัน) จะสร้างกรอบแยกให้
+// ครบทุกเลข ถ้าเป็นเอกสารชุดเดียว (เลขเดียวหรือหาเลขไม่เจอ) สร้างกรอบเดียวที่
+// หน้าสุดท้าย — ปรับตำแหน่งแต่ละกรอบเพิ่มเติมได้ถ้าต้องการ
 // ใช้เฉพาะคำขอที่ไม่ใช่ประเภทค่าใช้จ่าย (ซึ่งไม่มีเส้นเซ็นตายตัวในฟอร์ม)
 // ============================================================
 
@@ -66,26 +68,53 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
     applyBoxStyle();
   });
 
+  // ไฟล์เดียวอาจมีหลายเอกสาร/หลาย PO ปนกันอยู่ (เช่น รวมหลายใบไว้ในไฟล์เดียว) —
+  // ไล่ดูทุกหน้าของไฟล์ หาจุดที่มีป้ายกำกับ (เช่น "ผู้อนุมัติ") แล้วเช็คเลขที่เอกสาร
+  // ของแต่ละหน้านั้นด้วย ถ้าเลขซ้ำกันถือเป็นเอกสารชุดเดียว (กรอบเดียว ใช้หน้าสุดท้าย
+  // ที่เจอ) แต่ถ้าเลขไม่ซ้ำกันแปลว่ามีหลายเอกสารจริง ต้องแยกกรอบตามจำนวนเลขที่ไม่ซ้ำ
+  async function computeSignaturePagesForFile(fileIndex, detectText) {
+    const fallback = [{ pageIndex: viewer.getLastPageIndexOfFile(fileIndex), docNumber: null, ratio: null }];
+    if (!detectText) return fallback;
+
+    const candidates = [];
+    for (const pageIndex of viewer.getPageIndicesForFile(fileIndex)) {
+      const ratio = await viewer.findTextAnchorOnPage(pageIndex, detectText);
+      if (!ratio) continue;
+      const docNumber = await viewer.detectDocumentNumberOnPage(pageIndex);
+      candidates.push({ pageIndex, docNumber, ratio });
+    }
+    if (!candidates.length) return fallback;
+
+    const uniqueNumbers = [...new Set(candidates.map((c) => c.docNumber).filter(Boolean))];
+    if (uniqueNumbers.length <= 1) return [candidates[candidates.length - 1]];
+
+    return uniqueNumbers.map((num) => {
+      const matches = candidates.filter((c) => c.docNumber === num);
+      return matches[matches.length - 1];
+    });
+  }
+
   async function selectApprover(key, label, detectText) {
     activeKey = key;
     if (!placementsByApprover.has(key)) {
       const list = [];
       for (let fileIndex = 0; fileIndex < viewer.getFileCount(); fileIndex++) {
-        const pageIndex = viewer.getLastPageIndexOfFile(fileIndex);
         // ลองหาป้ายกำกับ (เช่น "ผู้อนุมัติ") ในเอกสารก่อน ถ้าเจอใช้ตำแหน่งเหนือป้าย
         // นั้นเป็นค่าเริ่มต้นเลย แม่นกว่าเดากลางหน้า — ถ้าไม่เจอค่อย fallback
-        const detected = detectText ? await viewer.findTextAnchorOnPage(pageIndex, detectText) : null;
-        const ratio = detected || DEFAULT_RATIO;
-        list.push({
-          fileIndex,
-          pageIndex,
-          xRatio: ratio.xRatio,
-          yRatio: ratio.yRatio,
-          wRatio: ratio.wRatio,
-          hRatio: ratio.hRatio,
-          previewUrl: null,
-          label,
-        });
+        const pages = await computeSignaturePagesForFile(fileIndex, detectText);
+        for (const { pageIndex, ratio } of pages) {
+          const r = ratio || DEFAULT_RATIO;
+          list.push({
+            fileIndex,
+            pageIndex,
+            xRatio: r.xRatio,
+            yRatio: r.yRatio,
+            wRatio: r.wRatio,
+            hRatio: r.hRatio,
+            previewUrl: null,
+            label,
+          });
+        }
       }
       placementsByApprover.set(key, list);
     } else {
