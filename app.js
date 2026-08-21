@@ -117,9 +117,11 @@ function setupPillGroup(groupId, onChange) {
 
 setupPillGroup("request-type-group", (input) => {
   const isExpense = input.value === "expense";
+  const isPo = input.value === "po";
   document.getElementById("expense-subtype-block").style.display = isExpense ? "block" : "none";
   document.getElementById("expense-items-block").style.display = isExpense ? "block" : "none";
-  document.getElementById("amount-block").style.display = isExpense ? "none" : "block";
+  // PO มักแนบเอกสารหลายชุด ไม่มียอดเงินรวมเดียวที่สื่อความหมาย จึงไม่ต้องมีช่องนี้
+  document.getElementById("amount-block").style.display = isExpense || isPo ? "none" : "block";
   document.getElementById("fixed-sig-block").style.display = isExpense ? "none" : "block";
   if (isExpense && !expenseItems.length) addExpenseItemRow();
   refreshSigPlacementUI();
