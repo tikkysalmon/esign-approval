@@ -15,6 +15,30 @@ function normalizeThai(s) {
 }
 
 /**
+ * ลองหาเลขที่เอกสาร (เช่น "P00001" จาก "ใบสั่งซื้อ #P00001") จากหน้าแรกของไฟล์
+ * ใช้รูปแบบเลข "#XXXXX" หรือ "PO XXXXX" เป็นตัวจับ — ไม่พึ่งข้อความภาษาไทยที่หน้าฟอร์ม
+ * แต่ละบริษัทเขียนไม่เหมือนกัน (และบางทีสระผสมเพี้ยนตอนแตกไฟล์) จึงมั่นใจกว่า
+ * bytes: ArrayBuffer ของไฟล์ PDF
+ * คืนค่า string (เช่น "P00001") หรือ null ถ้าหาไม่เจอ
+ */
+export async function detectDocumentNumber(bytes) {
+  try {
+    const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const page = await doc.getPage(1);
+    const content = await page.getTextContent();
+    const text = content.items.map((it) => it.str).join(" ");
+
+    let m = text.match(/#\s*([A-Za-z0-9][\w\-\/]{2,})/);
+    if (m) return m[1];
+    m = text.match(/\bPO[\s:#-]*([0-9][\w\-\/]{3,})/i);
+    if (m) return "PO" + m[1];
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * ค้นหาข้อความ (เช่น "ผู้อนุมัติ") บนหน้าที่ระบุ แล้วแนะนำตำแหน่งกรอบลายเซ็นที่ควร
  * วางไว้ "เหนือ" ข้อความนั้น (แบบฟอร์มส่วนใหญ่จะมีเส้นให้เซ็นอยู่เหนือป้ายกำกับ)
  * คืนค่า { xRatio, yRatio, wRatio, hRatio } หรือ null ถ้าไม่เจอข้อความนั้นในหน้า

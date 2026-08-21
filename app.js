@@ -3,6 +3,7 @@
 // ============================================================
 
 import { createSigBoxEditor } from "./sig-box-editor.js";
+import { detectDocumentNumber } from "./pdf-page-viewer.js";
 
 const sb = window.supabase.createClient(
   window.SUPABASE_CONFIG.url,
@@ -14,6 +15,7 @@ const SIGNATURES_BUCKET = "esign-signatures";
 
 let selectedFiles = []; // File[]
 let selectedFileLabels = []; // string[] — ป้ายกำกับต่อไฟล์ ตำแหน่งตรงกับ selectedFiles (ว่างได้ ไม่บังคับ)
+let selectedFileIsPoDetected = []; // boolean[] — true ถ้าป้ายกำกับของไฟล์นี้มาจากการตรวจจับเลข PO อัตโนมัติ
 let expenseItems = []; // [{ description, amount }]
 let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบแล้ว) หรือ null — ผู้เบิก (ค่าใช้จ่าย)
 let preparerSignatureBlob = null; // ผู้จัดทำ (เอกสารอื่นๆ)
@@ -407,17 +409,46 @@ fileInput.addEventListener("change", () => {
   fileInput.value = "";
 });
 
-function addFiles(fileList) {
+async function addFiles(fileList) {
+  const newFiles = [];
   Array.from(fileList).forEach((f) => {
     if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) return;
     const exists = selectedFiles.some((sf) => sf.name === f.name && sf.size === f.size);
-    if (!exists) {
-      selectedFiles.push(f);
-      selectedFileLabels.push("");
-    }
+    if (!exists) newFiles.push(f);
+  });
+  if (!newFiles.length) return;
+
+  // ใส่ placeholder ไว้ก่อน แล้วค่อยอัปเดตเป็นเลขที่ตรวจพบทีหลัง เผื่อไฟล์ใหญ่/ช้า
+  const startIdx = selectedFiles.length;
+  newFiles.forEach((f) => {
+    selectedFiles.push(f);
+    selectedFileLabels.push("");
+    selectedFileIsPoDetected.push(false);
   });
   renderFileList();
   refreshSigPlacementUI();
+
+  await Promise.all(
+    newFiles.map(async (f, i) => {
+      const idx = startIdx + i;
+      try {
+        const bytes = await f.arrayBuffer();
+        const poNumber = await detectDocumentNumber(bytes);
+        if (poNumber && selectedFiles[idx] === f) {
+          selectedFileLabels[idx] = `PO #${poNumber}`;
+          selectedFileIsPoDetected[idx] = true;
+        }
+      } catch (err) {
+        console.error("detectDocumentNumber failed:", err);
+      }
+    })
+  );
+  renderFileList();
+  refreshSigPlacementUI();
+}
+
+function knownPoLabels(excludeIdx) {
+  return [...new Set(selectedFileLabels.filter((label, i) => label && selectedFileIsPoDetected[i] && i !== excludeIdx))];
 }
 
 function renderFileList() {
@@ -427,7 +458,7 @@ function renderFileList() {
     const hint = document.createElement("div");
     hint.className = "hint";
     hint.style.marginBottom = "6px";
-    hint.textContent = "ถ้ามีหลายชุดปนกัน (เช่น ใบเสนอราคา + PO หลายใบ) ใส่ป้ายกำกับให้ไฟล์ที่เป็นชุดเดียวกัน ระบบจะจัดกลุ่มแสดงให้ผู้บริหารดูง่ายขึ้น";
+    hint.textContent = "ไฟล์ที่เป็นใบสั่งซื้อ (PO) ระบบจะอ่านเลขที่ให้อัตโนมัติ — ไฟล์อื่นๆ เลือกจากดรอปดาวน์ได้ว่าเป็นเอกสารประกอบของ PO ใบไหน";
     el.appendChild(hint);
   }
   selectedFiles.forEach((f, idx) => {
@@ -437,20 +468,61 @@ function renderFileList() {
     row.innerHTML =
       `<span>📄 ${f.name} (${(f.size / 1024).toFixed(0)} KB)</span>` +
       `<button class="btn-ghost" type="button" data-idx="${idx}">ลบ</button>`;
+
     if (selectedFiles.length > 1) {
-      const labelInput = document.createElement("input");
-      labelInput.type = "text";
-      labelInput.placeholder = "ป้ายกำกับชุด (ถ้ามี) เช่น PO #1";
-      labelInput.value = selectedFileLabels[idx] || "";
-      labelInput.style.cssText = "width:100%; margin-top:6px; font-size:13px; padding:6px 10px;";
-      labelInput.addEventListener("input", (e) => {
-        selectedFileLabels[idx] = e.target.value;
-      });
-      row.appendChild(labelInput);
+      if (selectedFileIsPoDetected[idx]) {
+        const labelInput = document.createElement("input");
+        labelInput.type = "text";
+        labelInput.value = selectedFileLabels[idx] || "";
+        labelInput.style.cssText = "width:100%; margin-top:6px; font-size:13px; padding:6px 10px;";
+        labelInput.addEventListener("change", (e) => {
+          selectedFileLabels[idx] = e.target.value;
+          renderFileList();
+        });
+        row.appendChild(labelInput);
+        const detectedHint = document.createElement("div");
+        detectedHint.className = "hint";
+        detectedHint.style.cssText = "width:100%; margin-top:2px;";
+        detectedHint.textContent = "🔍 ตรวจพบเลขที่เอกสารอัตโนมัติ (แก้ไขได้ถ้าไม่ตรง)";
+        row.appendChild(detectedHint);
+      } else {
+        const options = knownPoLabels(idx);
+        const select = document.createElement("select");
+        select.style.cssText = "width:100%; margin-top:6px; font-size:13px; padding:6px 10px;";
+        const manualValue = selectedFileLabels[idx] && !options.includes(selectedFileLabels[idx]);
+        select.innerHTML =
+          `<option value="">— ไม่จัดกลุ่ม —</option>` +
+          options.map((label) => `<option value="${label}"${label === selectedFileLabels[idx] ? " selected" : ""}>${label}</option>`).join("") +
+          `<option value="__manual__"${manualValue ? " selected" : ""}>อื่นๆ (พิมพ์ป้ายกำกับเอง)</option>`;
+        if (!options.length && !manualValue) select.value = "";
+        select.addEventListener("change", (e) => {
+          if (e.target.value === "__manual__") {
+            selectedFileLabels[idx] = selectedFileLabels[idx] && manualValue ? selectedFileLabels[idx] : "";
+          } else {
+            selectedFileLabels[idx] = e.target.value;
+          }
+          renderFileList();
+        });
+        row.appendChild(select);
+
+        if (manualValue || select.value === "__manual__") {
+          const manualInput = document.createElement("input");
+          manualInput.type = "text";
+          manualInput.placeholder = "พิมพ์ป้ายกำกับชุดเอง";
+          manualInput.value = selectedFileLabels[idx] || "";
+          manualInput.style.cssText = "width:100%; margin-top:6px; font-size:13px; padding:6px 10px;";
+          manualInput.addEventListener("change", (e) => {
+            selectedFileLabels[idx] = e.target.value;
+          });
+          row.appendChild(manualInput);
+        }
+      }
     }
+
     row.querySelector("button").addEventListener("click", () => {
       selectedFiles.splice(idx, 1);
       selectedFileLabels.splice(idx, 1);
+      selectedFileIsPoDetected.splice(idx, 1);
       renderFileList();
       refreshSigPlacementUI();
     });
@@ -726,6 +798,7 @@ function resetNewRequestForm() {
   document.getElementById("amount-block").style.display = "block";
   selectedFiles = [];
   selectedFileLabels = [];
+  selectedFileIsPoDetected = [];
   renderFileList();
   expenseItems = [{ description: "", amount: "" }];
   renderExpenseItems();
