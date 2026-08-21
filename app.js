@@ -19,6 +19,8 @@ let selectedApproverIds = new Set();
 let rosterCache = []; // approvers_roster rows (active only, for select)
 let rosterAllCache = []; // approvers_roster rows (all, for management table)
 let sigBoxEditor = null; // handle จาก createSigBoxEditor (สร้างใหม่ทุกครั้งที่ไฟล์แนบเปลี่ยน)
+let activeSigApproverId = null; // id ผู้อนุมัติที่กำลังวาง/แก้ตำแหน่งกรอบอยู่ (ใช้กับปุ่ม "ใช้กับทุกไฟล์")
+let activeSigApproverName = "";
 let sigBoxEditorFilesKey = ""; // เอาไว้เช็คว่าไฟล์แนบเปลี่ยนจริงไหม จะได้ไม่ต้องโหลด pdf.js ซ้ำ
 
 // ---------- ยูทิลิตี้ ----------
@@ -168,11 +170,35 @@ async function refreshSigPlacementUIInner() {
       },
       selectedFiles
     );
+    activeSigApproverId = null;
+    activeSigApproverName = "";
   }
 
   renderSigApproverTabs();
   renderSigFileJumpButtons();
+  updateApplyAllButton();
 }
+
+function updateApplyAllButton() {
+  const btn = document.getElementById("req-sig-apply-all-btn");
+  const status = document.getElementById("req-sig-apply-all-status");
+  const nameSpan = document.getElementById("req-sig-apply-all-name");
+  const show = sigBoxEditor && sigBoxEditor.getFileCount() > 1 && activeSigApproverId;
+  btn.style.display = show ? "inline-block" : "none";
+  status.style.display = "none";
+  if (show) nameSpan.textContent = ` ${activeSigApproverName}`;
+}
+
+document.getElementById("req-sig-apply-all-btn").addEventListener("click", () => {
+  sigPlacementRefreshChain = sigPlacementRefreshChain
+    .then(() => {
+      const count = sigBoxEditor.applyCurrentBoxToAllFiles();
+      const status = document.getElementById("req-sig-apply-all-status");
+      status.textContent = `✅ ใช้ตำแหน่งนี้กับอีก ${count} ไฟล์เรียบร้อย`;
+      status.style.display = "block";
+    })
+    .catch((err) => console.error("applyCurrentBoxToAllFiles failed:", err));
+});
 
 function renderSigFileJumpButtons() {
   const wrap = document.getElementById("req-sig-file-jump");
@@ -207,7 +233,12 @@ function renderSigApproverTabs() {
     chip.addEventListener("click", () => {
       sigPlacementRefreshChain = sigPlacementRefreshChain
         .then(() => sigBoxEditor.selectApprover(id, approver.name))
-        .then(() => renderSigApproverTabs())
+        .then(() => {
+          activeSigApproverId = id;
+          activeSigApproverName = approver.name;
+          renderSigApproverTabs();
+          updateApplyAllButton();
+        })
         .catch((err) => console.error("selectApprover failed:", err));
     });
     wrap.appendChild(chip);
@@ -625,6 +656,8 @@ function resetNewRequestForm() {
   document.getElementById("req-sig-preview-wrap").style.display = "none";
   sigBoxEditor = null;
   sigBoxEditorFilesKey = "";
+  activeSigApproverId = null;
+  activeSigApproverName = "";
   document.getElementById("req-sig-placement-block").style.display = "none";
   loadApproverSelect(); // จะไปเรียก refreshSigPlacementUI ต่อผ่าน selectedApproverIds = new Set()
 }

@@ -95,6 +95,24 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
     }
   }
 
+  // เอาตำแหน่ง/ขนาดของกรอบที่กำลังดูอยู่ (ของคนที่เลือกอยู่) ไปใช้กับทุกไฟล์ของคน
+  // เดียวกันเลย — ช่วยตอนมีเอกสารเยอะๆ (สิบกว่าไฟล์) ไม่ต้องปรับทีละไฟล์
+  function applyCurrentBoxToAllFiles() {
+    const source = boxForCurrentPage();
+    if (!source || !activeKey) return 0;
+    const list = placementsByApprover.get(activeKey);
+    let count = 0;
+    list.forEach((b) => {
+      if (b === source) return;
+      b.xRatio = source.xRatio;
+      b.yRatio = source.yRatio;
+      b.wRatio = source.wRatio;
+      b.hRatio = source.hRatio;
+      count++;
+    });
+    return count;
+  }
+
   function setPreviewImage(dataUrl) {
     const b = boxForCurrentPage();
     if (!b) return;
@@ -179,6 +197,7 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
   return {
     selectApprover,
     setPreviewImage,
+    applyCurrentBoxToAllFiles,
     getPlacements: (key) => {
       const list = placementsByApprover.get(key);
       if (!list) return null;
