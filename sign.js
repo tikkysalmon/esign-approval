@@ -3,6 +3,8 @@
 // เข้าถึงผ่าน sign.html?token=xxxxx ไม่ต้องล็อกอิน
 // ============================================================
 
+import { initSigBox, setSigBoxPreview, getSigBoxPlacement } from "./sig-box.js";
+
 const sb = window.supabase.createClient(
   window.SUPABASE_CONFIG.url,
   window.SUPABASE_CONFIG.anonKey
@@ -138,6 +140,28 @@ async function renderSignScreen() {
   await loadApproverSelect();
   showScreen("sign-screen");
   setupSignaturePad();
+
+  // คำขอที่ไม่ใช่ประเภทค่าใช้จ่าย ไม่มีเส้นเซ็นตายตัวในเอกสาร ต้องให้ผู้เซ็น
+  // เลือกวางตำแหน่งกรอบลายเซ็นเอง (ลาก/ย่อ/ขยายได้)
+  if (requestRow.request_type !== "expense") {
+    document.getElementById("sig-placement-card").style.display = "block";
+    const sortedFiles = [...requestRow.request_files].sort((a, b) => a.sort_order - b.sort_order);
+    await initSigBox(
+      {
+        viewport: document.getElementById("sig-page-viewport"),
+        canvas: document.getElementById("sig-page-canvas"),
+        box: document.getElementById("sig-box"),
+        boxImg: document.getElementById("sig-box-img"),
+        boxLabel: document.getElementById("sig-box-label"),
+        resizeHandle: document.getElementById("sig-box-resize"),
+        prevBtn: document.getElementById("sig-page-prev"),
+        nextBtn: document.getElementById("sig-page-next"),
+        indicator: document.getElementById("sig-page-indicator"),
+      },
+      sortedFiles,
+      filesPublicUrl
+    );
+  }
 }
 
 async function loadApproverSelect() {
@@ -207,7 +231,10 @@ function setupSignaturePad() {
     ctx.stroke();
     lastPoint = p;
   });
-  const stop = () => (isDrawing = false);
+  const stop = () => {
+    isDrawing = false;
+    if (hasDrawn && requestRow.request_type !== "expense") setSigBoxPreview(canvas.toDataURL("image/png"));
+  };
   canvas.addEventListener("pointerup", stop);
   canvas.addEventListener("pointerleave", stop);
   canvas.addEventListener("pointercancel", stop);
@@ -251,16 +278,22 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
     if (upErr) throw upErr;
 
     const signedAt = new Date().toISOString();
-    const { error: updErr } = await sb
-      .from("request_approvers")
-      .update({
-        approver_name: selectedOption.name,
-        approver_position: selectedOption.position,
-        status: "signed",
-        signature_image_path: sigPath,
-        signed_at: signedAt,
-      })
-      .eq("id", approverRow.id);
+    const updatePayload = {
+      approver_name: selectedOption.name,
+      approver_position: selectedOption.position,
+      status: "signed",
+      signature_image_path: sigPath,
+      signed_at: signedAt,
+    };
+    if (requestRow.request_type !== "expense") {
+      const placement = getSigBoxPlacement();
+      updatePayload.sig_page_index = placement.pageIndex;
+      updatePayload.sig_x_ratio = placement.xRatio;
+      updatePayload.sig_y_ratio = placement.yRatio;
+      updatePayload.sig_w_ratio = placement.wRatio;
+      updatePayload.sig_h_ratio = placement.hRatio;
+    }
+    const { error: updErr } = await sb.from("request_approvers").update(updatePayload).eq("id", approverRow.id);
     if (updErr) throw updErr;
 
     btn.textContent = "กำลังสร้างไฟล์ PDF...";
@@ -282,14 +315,14 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
       signedApprovers,
       getFileUrl: filesPublicUrl,
       getSignatureUrl: (path) => getPublicUrl(SIGNATURES_BUCKET, path),
-      // ฟอร์มใบเบิกเงิน/เงินสดย่อยมีเส้นเซ็น "ผู้อนุมัติ" ในตัวอยู่แล้ว (ประทับด้านล่าง)
-      // ไม่ต้องมีหน้าสรุปแยกซ้ำอีกหน้า
-      skipSummaryPage: requestRow.request_type === "expense",
+      // ฟอร์มใบเบิกเงิน/เงินสดย่อย และคำขออื่นๆ ที่วางกรอบลายเซ็นเองแล้ว มีที่เซ็น
+      // อยู่บนเอกสารโดยตรงอยู่แล้ว ไม่ต้องมีหน้าสรุปแยกซ้ำอีกหน้า
+      skipSummaryPage: true,
     });
 
-    // สำหรับคำขอค่าใช้จ่าย: ประทับลายเซ็นจริงลงบนเส้น "ผู้อนุมัติ" ของฟอร์ม
-    // ใบเบิกเงิน/ใบเบิกเงินสดย่อย (หน้าแรกของเอกสาร) โดยตรง
     if (requestRow.request_type === "expense") {
+      // ประทับลายเซ็นจริงลงบนเส้น "ผู้อนุมัติ" ของฟอร์มใบเบิกเงิน/ใบเบิกเงินสดย่อย
+      // (หน้าแรกของเอกสาร) โดยตรง
       const mergedDoc = await PDFLib.PDFDocument.load(pdfBytes);
       const sigArrayBuffer = await signatureBlob.arrayBuffer();
       await stampApproverOnExpenseForm(
@@ -299,6 +332,13 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
         selectedOption.name,
         selectedOption.position,
         signedAt
+      );
+      pdfBytes = await mergedDoc.save();
+    } else {
+      // ประทับลายเซ็นของผู้อนุมัติทุกคนที่เซ็นแล้ว ลงบนตำแหน่งกรอบที่แต่ละคนวางไว้เอง
+      const mergedDoc = await PDFLib.PDFDocument.load(pdfBytes);
+      await stampApproversAtBoxPositions(mergedDoc, signedApprovers, (path) =>
+        getPublicUrl(SIGNATURES_BUCKET, path)
       );
       pdfBytes = await mergedDoc.save();
     }

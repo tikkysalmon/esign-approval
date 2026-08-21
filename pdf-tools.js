@@ -120,3 +120,39 @@ async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, get
 
   return await outDoc.save();
 }
+
+/**
+ * ประทับลายเซ็นของผู้อนุมัติแต่ละคนลงบนตำแหน่งกรอบที่แต่ละคนวางไว้เอง (สำหรับ
+ * คำขอที่ไม่ใช่ประเภทค่าใช้จ่าย เช่นใบเสนอราคา ซึ่งไม่มีเส้นเซ็นตายตัวในเอกสาร)
+ * ต้องเรียกซ้ำทุกคนที่เซ็นแล้วทุกครั้งที่มีคนเซ็นเพิ่ม เพราะ mergedDoc ถูกสร้างใหม่
+ * จากไฟล์ต้นฉบับทุกครั้ง (ไม่งั้นลายเซ็นของคนก่อนหน้าจะหายไป)
+ *
+ * mergedDoc: PDFDocument (จาก PDFLib.PDFDocument.load ของไฟล์ที่ merge แล้ว)
+ * signedApprovers: [{ signature_image_path, sig_page_index, sig_x_ratio, sig_y_ratio, sig_w_ratio, sig_h_ratio }]
+ * getSignatureUrl: (storagePath) => publicUrl string (bucket esign-signatures)
+ */
+async function stampApproversAtBoxPositions(mergedDoc, signedApprovers, getSignatureUrl) {
+  for (const a of signedApprovers) {
+    if (a.sig_page_index === null || a.sig_page_index === undefined) continue;
+    if (a.sig_page_index >= mergedDoc.getPageCount()) continue;
+
+    const page = mergedDoc.getPage(a.sig_page_index);
+    const pageWidth = page.getWidth();
+    const pageHeight = page.getHeight();
+
+    const boxLeft = a.sig_x_ratio * pageWidth;
+    const boxWidth = a.sig_w_ratio * pageWidth;
+    const boxHeight = a.sig_h_ratio * pageHeight;
+    const boxBottom = pageHeight * (1 - a.sig_y_ratio - a.sig_h_ratio);
+
+    const sigBytes = await fetchArrayBuffer(getSignatureUrl(a.signature_image_path));
+    const sigImage = await mergedDoc.embedPng(sigBytes);
+    const scaled = sigImage.scaleToFit(boxWidth, boxHeight);
+    page.drawImage(sigImage, {
+      x: boxLeft + (boxWidth - scaled.width) / 2,
+      y: boxBottom + (boxHeight - scaled.height) / 2,
+      width: scaled.width,
+      height: scaled.height,
+    });
+  }
+}

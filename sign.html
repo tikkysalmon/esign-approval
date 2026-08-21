@@ -54,9 +54,29 @@
       <div class="sig-actions">
         <button class="btn-ghost" id="clear-sig-btn" type="button">ล้างลายเซ็น</button>
       </div>
+    </div>
 
+    <div class="card" id="sig-placement-card" style="display:none;">
+      <h2>วางตำแหน่งลายเซ็นบนเอกสาร</h2>
+      <div class="hint">คลิกค้างที่กรอบเพื่อลากย้ายตำแหน่ง / ลากมุมล่างขวาของกรอบเพื่อย่อ-ขยายขนาด</div>
+      <div class="sig-page-nav">
+        <button class="btn-ghost" type="button" id="sig-page-prev">← หน้าก่อน</button>
+        <span id="sig-page-indicator" class="hint">หน้า 1 / 1</span>
+        <button class="btn-ghost" type="button" id="sig-page-next">หน้าถัดไป →</button>
+      </div>
+      <div id="sig-page-viewport" class="sig-page-viewport">
+        <canvas id="sig-page-canvas"></canvas>
+        <div id="sig-box" class="sig-box">
+          <div class="sig-box-img" id="sig-box-img"></div>
+          <div class="sig-box-label" id="sig-box-label">ลายเซ็นของท่าน</div>
+          <div class="sig-box-resize-handle" id="sig-box-resize"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <div id="sign-error" class="error-msg" style="display:none;"></div>
-      <button class="btn-primary" id="confirm-sign-btn" style="width:100%; margin-top:20px;">ยืนยันเซ็นเอกสาร</button>
+      <button class="btn-primary" id="confirm-sign-btn" style="width:100%;">ยืนยันเซ็นเอกสาร</button>
     </div>
   </main>
 </div>
@@ -74,6 +94,6 @@
 <script src="config.js"></script>
 <script src="pdf-tools.js"></script>
 <script src="expense-form.js"></script>
-<script src="sign.js"></script>
+<script type="module" src="sign.js"></script>
 </body>
 </html>
