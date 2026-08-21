@@ -169,6 +169,26 @@ async function refreshSigPlacementUIInner() {
   }
 
   renderSigApproverTabs();
+  renderSigFileJumpButtons();
+}
+
+function renderSigFileJumpButtons() {
+  const wrap = document.getElementById("req-sig-file-jump");
+  wrap.innerHTML = "";
+  if (!sigBoxEditor) return;
+  for (let i = 0; i < sigBoxEditor.getFileCount(); i++) {
+    const file = selectedFiles[i];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "checkbox-pill";
+    btn.textContent = `📄 ${file ? file.name : "ไฟล์ " + (i + 1)}`;
+    btn.addEventListener("click", () => {
+      sigPlacementRefreshChain = sigPlacementRefreshChain
+        .then(() => sigBoxEditor.goToFileLastPage(i))
+        .catch((err) => console.error("goToFileLastPage failed:", err));
+    });
+    wrap.appendChild(btn);
+  }
 }
 
 function renderSigApproverTabs() {
@@ -177,7 +197,7 @@ function renderSigApproverTabs() {
   [...selectedApproverIds].forEach((id) => {
     const approver = rosterCache.find((a) => a.id === id);
     if (!approver || !sigBoxEditor) return;
-    const placed = sigBoxEditor.getPlacement(id) !== null;
+    const placed = sigBoxEditor.getPlacements(id) !== null;
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "checkbox-pill" + (placed ? " selected" : "");
@@ -402,7 +422,7 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
   if (!isExpense && !selectedFiles.length) return showNewRequestError("กรุณาแนบไฟล์ PDF อย่างน้อย 1 ไฟล์");
   if (!selectedApproverIds.size) return showNewRequestError("กรุณาเลือกผู้บริหารอย่างน้อย 1 คน");
   if (!isExpense && sigBoxEditor) {
-    const missing = [...selectedApproverIds].filter((id) => !sigBoxEditor.getPlacement(id));
+    const missing = [...selectedApproverIds].filter((id) => !sigBoxEditor.getPlacements(id));
     if (missing.length) return showNewRequestError("กรุณาวางตำแหน่งลายเซ็นให้ครบทุกคนที่เลือกไว้ก่อนส่งคำขอ");
   }
 
@@ -479,12 +499,7 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         approver_position: approver.position,
       };
       if (!isExpense && sigBoxEditor) {
-        const placement = sigBoxEditor.getPlacement(approverId);
-        approverPayload.sig_page_index = placement.pageIndex;
-        approverPayload.sig_x_ratio = placement.xRatio;
-        approverPayload.sig_y_ratio = placement.yRatio;
-        approverPayload.sig_w_ratio = placement.wRatio;
-        approverPayload.sig_h_ratio = placement.hRatio;
+        approverPayload.sig_boxes = sigBoxEditor.getPlacements(approverId);
       }
       const { data: apRow, error: apErr } = await sb
         .from("request_approvers")

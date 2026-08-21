@@ -97,8 +97,10 @@
 
         <div id="req-sig-placement-block" style="display:none;">
           <label style="margin-top:20px;">วางตำแหน่งลายเซ็นให้แต่ละท่าน</label>
-          <div class="hint">เลือกชื่อผู้อนุมัติด้านล่าง แล้วลากกรอบไปวางตำแหน่งบนเอกสาร (ทำทีละคน — ต้องวางให้ครบทุกคนก่อนส่ง)</div>
+          <div class="hint">เลือกชื่อผู้อนุมัติด้านล่าง แล้วลากกรอบไปวางตำแหน่งบนเอกสาร (ทำทีละคน — ต้องวางให้ครบทุกคนก่อนส่ง) — แต่ละคนเซ็นแค่ครั้งเดียว ระบบจะเตรียมกรอบให้อัตโนมัติที่หน้าสุดท้ายของ<strong>ทุกไฟล์</strong>ที่แนบ เพื่อให้ลายเซ็นเดียวกันไปปรากฏบนเอกสารทุกฉบับ ปรับตำแหน่งแต่ละไฟล์เพิ่มเติมได้ถ้าต้องการ</div>
           <div class="checkbox-group" id="req-sig-approver-tabs" style="margin-top:8px;"></div>
+          <div class="hint" style="margin-top:10px;">กระโดดไปดูกรอบของไฟล์:</div>
+          <div class="checkbox-group" id="req-sig-file-jump" style="margin-top:6px;"></div>
           <div class="sig-page-nav">
             <button class="btn-ghost" type="button" id="req-sig-page-prev">← หน้าก่อน</button>
             <span id="req-sig-page-indicator" class="hint">หน้า 1 / 1</span>

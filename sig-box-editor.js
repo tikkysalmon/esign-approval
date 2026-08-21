@@ -1,6 +1,9 @@
 // ============================================================
 // ตัวแก้ไขตำแหน่งกรอบลายเซ็น — ใช้ฝั่งพนักงานตอนสร้างคำขอ (index.html)
 // วางกรอบลายเซ็นแยกต่างหากให้ผู้อนุมัติแต่ละคนได้ ก่อนส่งลิงก์ไปให้เซ็น
+// ผู้อนุมัติ 1 คน เซ็นครั้งเดียว แต่ลายเซ็นจะไปปรากฏบน "ทุกไฟล์" ที่แนบมา —
+// จึงสร้างกรอบให้อัตโนมัติ 1 กรอบ/1 ไฟล์ (ที่หน้าสุดท้ายของแต่ละไฟล์) ทันทีที่
+// เลือกผู้อนุมัติคนนั้น แล้วให้ปรับตำแหน่งแต่ละกรอบเพิ่มเติมได้ถ้าต้องการ
 // ใช้เฉพาะคำขอที่ไม่ใช่ประเภทค่าใช้จ่าย (ซึ่งไม่มีเส้นเซ็นตายตัวในฟอร์ม)
 // ============================================================
 
@@ -8,6 +11,7 @@ import { createPdfPageViewer } from "./pdf-page-viewer.js";
 
 const MIN_BOX_W = 60;
 const MIN_BOX_H = 30;
+const DEFAULT_RATIO = { xRatio: 0.32, yRatio: 0.78, wRatio: 0.34, hRatio: 0.12 };
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -20,79 +24,87 @@ function clamp(v, min, max) {
  *   ที่จะถูกอัปโหลด/รวมกันตอนส่งคำขอ (index ในอาเรย์นี้ = sort_order)
  *
  * คืนค่า handle:
- *   selectApprover(key, label) — สลับไปวาง/แก้ตำแหน่งของผู้อนุมัติคนนี้
- *   setPreviewImage(dataUrl) — อัปเดตรูปตัวอย่างในกรอบของคนที่กำลังเลือกอยู่
- *   getPlacement(key) — คืนตำแหน่งที่วางไว้ของคนนั้น (หรือ null ถ้ายังไม่เคยเลือก)
- *   getAllKeys() — รายชื่อ key ทั้งหมดที่เคยวางตำแหน่งแล้ว
+ *   selectApprover(key, label) — สลับไปดู/แก้ตำแหน่งกรอบทั้งหมดของผู้อนุมัติคนนี้
+ *     (สร้างกรอบเริ่มต้นให้อัตโนมัติ 1 กรอบ/ไฟล์ ถ้ายังไม่เคยเลือกมาก่อน)
+ *   setPreviewImage(dataUrl) — อัปเดตรูปตัวอย่างในกรอบของหน้าที่กำลังแสดงอยู่
+ *   getPlacements(key) — คืนอาเรย์ตำแหน่งกรอบทั้งหมดของคนนั้น (หรือ null ถ้ายังไม่เคยเลือก)
+ *   getFileCount() — จำนวนไฟล์ทั้งหมด (ใช้เช็คว่าวางกรอบครบทุกไฟล์ยัง)
  */
 export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
-  const placements = new Map(); // key -> { pageIndex, xRatio, yRatio, wRatio, hRatio, previewUrl }
+  // key -> [{ fileIndex, pageIndex, xRatio, yRatio, wRatio, hRatio, previewUrl, label }, ...]
+  const placementsByApprover = new Map();
   let activeKey = null;
   let canvasWidth = 0;
   let canvasHeight = 0;
-  let approverIndex = 0;
+
+  function boxForCurrentPage() {
+    if (!activeKey) return null;
+    const list = placementsByApprover.get(activeKey);
+    if (!list) return null;
+    return list.find((b) => b.pageIndex === viewer.getCurrentIndex()) || null;
+  }
 
   function applyBoxStyle() {
-    const p = placements.get(activeKey);
-    if (!p) return;
-    boxEls.box.style.left = p.xRatio * canvasWidth + "px";
-    boxEls.box.style.top = p.yRatio * canvasHeight + "px";
-    boxEls.box.style.width = p.wRatio * canvasWidth + "px";
-    boxEls.box.style.height = p.hRatio * canvasHeight + "px";
-    boxEls.boxImg.style.backgroundImage = p.previewUrl ? `url(${p.previewUrl})` : "none";
-    boxEls.boxLabel.style.display = p.previewUrl ? "none" : "block";
-    boxEls.boxLabel.textContent = p.label || "ลายเซ็น";
+    const b = boxForCurrentPage();
+    if (!b) {
+      boxEls.box.style.display = "none";
+      return;
+    }
+    boxEls.box.style.display = "flex";
+    boxEls.box.style.left = b.xRatio * canvasWidth + "px";
+    boxEls.box.style.top = b.yRatio * canvasHeight + "px";
+    boxEls.box.style.width = b.wRatio * canvasWidth + "px";
+    boxEls.box.style.height = b.hRatio * canvasHeight + "px";
+    boxEls.boxImg.style.backgroundImage = b.previewUrl ? `url(${b.previewUrl})` : "none";
+    boxEls.boxLabel.style.display = b.previewUrl ? "none" : "block";
+    boxEls.boxLabel.textContent = b.label || "ลายเซ็น";
   }
 
-  const getBytes = (file) => file.arrayBuffer();
-  const viewer = await createPdfPageViewer(fileEls, localFiles, getBytes, (index, w, h) => {
+  const viewer = await createPdfPageViewer(fileEls, localFiles, (f) => f.arrayBuffer(), (index, w, h) => {
     canvasWidth = w;
     canvasHeight = h;
-    const p = activeKey && placements.get(activeKey);
-    const visible = p && p.pageIndex === index;
-    boxEls.box.style.display = visible ? "flex" : "none";
-    if (visible) applyBoxStyle();
+    applyBoxStyle();
   });
-
-  function defaultPlacementFor(label) {
-    const stagger = (approverIndex % 3) * 0.09;
-    approverIndex += 1;
-    return {
-      pageIndex: viewer.getPageCount() - 1,
-      xRatio: 0.32,
-      yRatio: clamp(0.62 + stagger, 0, 0.8),
-      wRatio: 0.34,
-      hRatio: 0.12,
-      previewUrl: null,
-      label,
-    };
-  }
 
   async function selectApprover(key, label) {
     activeKey = key;
-    if (!placements.has(key)) {
-      placements.set(key, defaultPlacementFor(label));
+    if (!placementsByApprover.has(key)) {
+      const list = [];
+      for (let fileIndex = 0; fileIndex < viewer.getFileCount(); fileIndex++) {
+        list.push({
+          fileIndex,
+          pageIndex: viewer.getLastPageIndexOfFile(fileIndex),
+          xRatio: DEFAULT_RATIO.xRatio,
+          yRatio: DEFAULT_RATIO.yRatio,
+          wRatio: DEFAULT_RATIO.wRatio,
+          hRatio: DEFAULT_RATIO.hRatio,
+          previewUrl: null,
+          label,
+        });
+      }
+      placementsByApprover.set(key, list);
     } else {
-      placements.get(key).label = label;
+      placementsByApprover.get(key).forEach((b) => (b.label = label));
     }
-    const p = placements.get(key);
-    if (viewer.getCurrentIndex() !== p.pageIndex) {
-      await viewer.goToPage(p.pageIndex);
+    // พาไปหน้าสุดท้ายของไฟล์แรก จะได้เห็นกรอบทันที
+    const firstBoxPage = placementsByApprover.get(key)[0]?.pageIndex ?? 0;
+    if (viewer.getCurrentIndex() !== firstBoxPage) {
+      await viewer.goToPage(firstBoxPage);
     } else {
-      boxEls.box.style.display = "flex";
       applyBoxStyle();
     }
   }
 
   function setPreviewImage(dataUrl) {
-    if (!activeKey) return;
-    const p = placements.get(activeKey);
-    if (!p) return;
-    p.previewUrl = dataUrl;
+    const b = boxForCurrentPage();
+    if (!b) return;
+    b.previewUrl = dataUrl;
+    // อัปเดตรูปตัวอย่างทุกกรอบของคนนี้ (จะได้เห็นว่าลายเซ็นเดียวกันไปอยู่ทุกไฟล์)
+    placementsByApprover.get(activeKey).forEach((box) => (box.previewUrl = dataUrl));
     applyBoxStyle();
   }
 
-  // ---------- ลาก/ย่อ-ขยาย เฉพาะกรอบของคนที่กำลังเลือกอยู่ ----------
+  // ---------- ลาก/ย่อ-ขยาย เฉพาะกรอบของหน้าที่กำลังแสดงอยู่ (ของคนที่เลือกอยู่) ----------
 
   let dragging = false;
   let dStartX = 0;
@@ -101,24 +113,26 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
   let dStartTop = 0;
 
   boxEls.box.addEventListener("pointerdown", (e) => {
-    if (e.target === boxEls.resizeHandle || !activeKey) return;
-    const p = placements.get(activeKey);
+    if (e.target === boxEls.resizeHandle) return;
+    const b = boxForCurrentPage();
+    if (!b) return;
     dragging = true;
     dStartX = e.clientX;
     dStartY = e.clientY;
-    dStartLeft = p.xRatio * canvasWidth;
-    dStartTop = p.yRatio * canvasHeight;
+    dStartLeft = b.xRatio * canvasWidth;
+    dStartTop = b.yRatio * canvasHeight;
     boxEls.box.setPointerCapture(e.pointerId);
   });
   boxEls.box.addEventListener("pointermove", (e) => {
-    if (!dragging || !activeKey) return;
-    const p = placements.get(activeKey);
-    const boxW = p.wRatio * canvasWidth;
-    const boxH = p.hRatio * canvasHeight;
+    if (!dragging) return;
+    const b = boxForCurrentPage();
+    if (!b) return;
+    const boxW = b.wRatio * canvasWidth;
+    const boxH = b.hRatio * canvasHeight;
     const newLeft = clamp(dStartLeft + (e.clientX - dStartX), 0, canvasWidth - boxW);
     const newTop = clamp(dStartTop + (e.clientY - dStartY), 0, canvasHeight - boxH);
-    p.xRatio = newLeft / canvasWidth;
-    p.yRatio = newTop / canvasHeight;
+    b.xRatio = newLeft / canvasWidth;
+    b.yRatio = newTop / canvasHeight;
     applyBoxStyle();
   });
   const stopDrag = () => (dragging = false);
@@ -132,25 +146,26 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
   let rStartH = 0;
 
   boxEls.resizeHandle.addEventListener("pointerdown", (e) => {
-    if (!activeKey) return;
-    const p = placements.get(activeKey);
+    const b = boxForCurrentPage();
+    if (!b) return;
     resizing = true;
     rStartX = e.clientX;
     rStartY = e.clientY;
-    rStartW = p.wRatio * canvasWidth;
-    rStartH = p.hRatio * canvasHeight;
+    rStartW = b.wRatio * canvasWidth;
+    rStartH = b.hRatio * canvasHeight;
     boxEls.resizeHandle.setPointerCapture(e.pointerId);
     e.stopPropagation();
   });
   boxEls.resizeHandle.addEventListener("pointermove", (e) => {
-    if (!resizing || !activeKey) return;
-    const p = placements.get(activeKey);
-    const left = p.xRatio * canvasWidth;
-    const top = p.yRatio * canvasHeight;
+    if (!resizing) return;
+    const b = boxForCurrentPage();
+    if (!b) return;
+    const left = b.xRatio * canvasWidth;
+    const top = b.yRatio * canvasHeight;
     const newW = clamp(rStartW + (e.clientX - rStartX), MIN_BOX_W, canvasWidth - left);
     const newH = clamp(rStartH + (e.clientY - rStartY), MIN_BOX_H, canvasHeight - top);
-    p.wRatio = newW / canvasWidth;
-    p.hRatio = newH / canvasHeight;
+    b.wRatio = newW / canvasWidth;
+    b.hRatio = newH / canvasHeight;
     applyBoxStyle();
     e.stopPropagation();
   });
@@ -164,11 +179,18 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
   return {
     selectApprover,
     setPreviewImage,
-    getPlacement: (key) => {
-      const p = placements.get(key);
-      if (!p) return null;
-      return { pageIndex: p.pageIndex, xRatio: p.xRatio, yRatio: p.yRatio, wRatio: p.wRatio, hRatio: p.hRatio };
+    getPlacements: (key) => {
+      const list = placementsByApprover.get(key);
+      if (!list) return null;
+      return list.map((b) => ({
+        pageIndex: b.pageIndex,
+        xRatio: b.xRatio,
+        yRatio: b.yRatio,
+        wRatio: b.wRatio,
+        hRatio: b.hRatio,
+      }));
     },
-    getAllKeys: () => [...placements.keys()],
+    getFileCount: () => viewer.getFileCount(),
+    goToFileLastPage: (fileIndex) => viewer.goToPage(viewer.getLastPageIndexOfFile(fileIndex)),
   };
 }

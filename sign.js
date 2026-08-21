@@ -147,16 +147,7 @@ async function renderSignScreen() {
   if (requestRow.request_type !== "expense") {
     document.getElementById("sig-placement-card").style.display = "block";
     const sortedFiles = [...requestRow.request_files].sort((a, b) => a.sort_order - b.sort_order);
-    const placement =
-      approverRow.sig_page_index !== null && approverRow.sig_page_index !== undefined
-        ? {
-            pageIndex: approverRow.sig_page_index,
-            xRatio: approverRow.sig_x_ratio,
-            yRatio: approverRow.sig_y_ratio,
-            wRatio: approverRow.sig_w_ratio,
-            hRatio: approverRow.sig_h_ratio,
-          }
-        : null;
+    const placements = Array.isArray(approverRow.sig_boxes) ? approverRow.sig_boxes : [];
     await initSigBox(
       {
         viewport: document.getElementById("sig-page-viewport"),
@@ -171,7 +162,7 @@ async function renderSignScreen() {
       },
       sortedFiles,
       filesPublicUrl,
-      placement
+      placements
     );
     if (!hasSigBoxPlacement()) {
       document.getElementById("sig-placement-hint").textContent =
@@ -294,7 +285,7 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
     if (upErr) throw upErr;
 
     const signedAt = new Date().toISOString();
-    // ตำแหน่งกรอบลายเซ็น (sig_page_index/x/y/w/h) ผู้ขออนุมัติกำหนดไว้ล่วงหน้า
+    // ตำแหน่งกรอบลายเซ็น (sig_boxes) ผู้ขออนุมัติกำหนดไว้ล่วงหน้า
     // ตั้งแต่ตอนสร้างคำขอแล้ว ตรงนี้แค่บันทึกว่าเซ็นแล้ว ไม่ต้องเขียนตำแหน่งทับ
     const updatePayload = {
       approver_name: selectedOption.name,

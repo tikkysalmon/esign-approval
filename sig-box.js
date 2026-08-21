@@ -1,40 +1,42 @@
 // ============================================================
 // แสดงตำแหน่งกรอบลายเซ็นที่พนักงานวางไว้ล่วงหน้า — ใช้ฝั่งผู้บริหาร (sign.html)
 // เป็นแบบดูอย่างเดียว (ลาก/ย่อ-ขยายไม่ได้แล้ว เพราะพนักงานกำหนดตำแหน่งมาก่อนส่ง)
-// เปิดมาจะเลื่อนไปหน้าที่ต้องเซ็นให้อัตโนมัติ แต่ยังเลื่อนดูหน้าอื่นๆ ได้ตามปกติ
+// เซ็นครั้งเดียวแต่ลายเซ็นจะไปโผล่ทุกไฟล์ที่แนบมา — จึงอาจมีกรอบมากกว่า 1 จุด
+// (คนละหน้ากัน) เปิดมาจะเลื่อนไปหน้าแรกที่มีกรอบให้อัตโนมัติ แต่ยังเลื่อนดูหน้า
+// อื่นๆ ได้ตามปกติ กรอบจะโผล่เองตามหน้าที่มีการวางไว้
 // ============================================================
 
 import { createPdfPageViewer } from "./pdf-page-viewer.js";
 
 let els = null;
-let placement = null; // { pageIndex, xRatio, yRatio, wRatio, hRatio }
+let placements = []; // [{ pageIndex, xRatio, yRatio, wRatio, hRatio }, ...]
 
 /**
  * files: [{ storage_path, sort_order }] เรียงตาม sort_order แล้ว
  * getFileUrl: (storage_path) => publicUrl
- * approverPlacement: { pageIndex, xRatio, yRatio, wRatio, hRatio } ที่พนักงานวางไว้
+ * approverPlacements: [{ pageIndex, xRatio, yRatio, wRatio, hRatio }, ...] ที่พนักงานวางไว้
  */
-export async function initSigBox(fileEls, files, getFileUrl, approverPlacement) {
+export async function initSigBox(fileEls, files, getFileUrl, approverPlacements) {
   els = fileEls;
-  placement = approverPlacement;
+  placements = approverPlacements || [];
 
   const getBytes = (f) => fetch(getFileUrl(f.storage_path)).then((r) => r.arrayBuffer());
   const viewer = await createPdfPageViewer(fileEls, files, getBytes, (index, canvasWidth, canvasHeight) => {
-    const onAssignedPage = placement && placement.pageIndex === index;
-    els.box.style.display = onAssignedPage ? "flex" : "none";
-    if (onAssignedPage) {
-      els.box.style.left = placement.xRatio * canvasWidth + "px";
-      els.box.style.top = placement.yRatio * canvasHeight + "px";
-      els.box.style.width = placement.wRatio * canvasWidth + "px";
-      els.box.style.height = placement.hRatio * canvasHeight + "px";
+    const match = placements.find((p) => p.pageIndex === index);
+    els.box.style.display = match ? "flex" : "none";
+    if (match) {
+      els.box.style.left = match.xRatio * canvasWidth + "px";
+      els.box.style.top = match.yRatio * canvasHeight + "px";
+      els.box.style.width = match.wRatio * canvasWidth + "px";
+      els.box.style.height = match.hRatio * canvasHeight + "px";
     }
   });
 
   els.resizeHandle.style.display = "none";
   els.box.style.cursor = "default";
 
-  if (placement && placement.pageIndex !== viewer.getCurrentIndex()) {
-    await viewer.goToPage(placement.pageIndex);
+  if (placements.length && placements[0].pageIndex !== viewer.getCurrentIndex()) {
+    await viewer.goToPage(placements[0].pageIndex);
   }
 }
 
@@ -45,5 +47,5 @@ export function setSigBoxPreview(dataUrl) {
 }
 
 export function hasSigBoxPlacement() {
-  return !!placement;
+  return placements.length > 0;
 }

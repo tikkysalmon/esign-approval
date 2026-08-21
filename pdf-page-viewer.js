@@ -15,16 +15,19 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.mjs";
  *   File object ในเครื่องก็ได้ แล้วแต่บริบทที่เรียกใช้)
  * onPageRendered: (index, canvasWidth, canvasHeight) => void — เรียกทุกครั้งหลังเรนเดอร์หน้าเสร็จ
  *
- * คืนค่า handle: { getPageCount, getCurrentIndex, goToPage(idx), getCanvasSize }
+ * คืนค่า handle: { getPageCount, getCurrentIndex, goToPage(idx), getCanvasSize,
+ *   getFileCount, getLastPageIndexOfFile(fileIndex), getFileIndexOfPage(pageIndex) }
  */
 export async function createPdfPageViewer(fileEls, items, getBytes, onPageRendered) {
-  const flatPages = [];
-  for (const item of items) {
-    const bytes = await getBytes(item);
+  const flatPages = []; // { pdfDoc, pageNumInFile, fileIndex }
+  const lastPageIndexPerFile = []; // lastPageIndexPerFile[fileIndex] = flatIndex ของหน้าสุดท้ายของไฟล์นั้น
+  for (let fileIndex = 0; fileIndex < items.length; fileIndex++) {
+    const bytes = await getBytes(items[fileIndex]);
     const pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
     for (let p = 1; p <= pdfDoc.numPages; p++) {
-      flatPages.push({ pdfDoc, pageNumInFile: p });
+      flatPages.push({ pdfDoc, pageNumInFile: p, fileIndex });
     }
+    lastPageIndexPerFile.push(flatPages.length - 1);
   }
 
   let currentIndex = 0;
@@ -66,5 +69,8 @@ export async function createPdfPageViewer(fileEls, items, getBytes, onPageRender
     getCurrentIndex: () => currentIndex,
     goToPage: (idx) => renderPage(idx),
     getCanvasSize: () => ({ width: canvasWidth, height: canvasHeight }),
+    getFileCount: () => items.length,
+    getLastPageIndexOfFile: (fileIndex) => lastPageIndexPerFile[fileIndex],
+    getFileIndexOfPage: (pageIndex) => flatPages[pageIndex]?.fileIndex,
   };
 }
