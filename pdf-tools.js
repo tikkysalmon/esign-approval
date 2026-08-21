@@ -122,20 +122,28 @@ async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, get
 }
 
 /**
- * ประทับลายเซ็นของผู้อนุมัติแต่ละคนลงบนตำแหน่งกรอบที่แต่ละคนวางไว้เอง (สำหรับ
- * คำขอที่ไม่ใช่ประเภทค่าใช้จ่าย เช่นใบเสนอราคา ซึ่งไม่มีเส้นเซ็นตายตัวในเอกสาร)
+ * ประทับลายเซ็นของผู้อนุมัติแต่ละคนลงบนตำแหน่งกรอบที่แต่ละคนวางไว้เอง พร้อม
+ * วันเวลาที่เซ็นอยู่ใต้ลายเซ็น (สำหรับคำขอที่ไม่ใช่ประเภทค่าใช้จ่าย เช่นใบเสนอราคา
+ * ซึ่งไม่มีเส้นเซ็นตายตัวในเอกสาร)
  * ต้องเรียกซ้ำทุกคนที่เซ็นแล้วทุกครั้งที่มีคนเซ็นเพิ่ม เพราะ mergedDoc ถูกสร้างใหม่
  * จากไฟล์ต้นฉบับทุกครั้ง (ไม่งั้นลายเซ็นของคนก่อนหน้าจะหายไป)
  *
  * mergedDoc: PDFDocument (จาก PDFLib.PDFDocument.load ของไฟล์ที่ merge แล้ว)
- * signedApprovers: [{ signature_image_path, sig_page_index, sig_x_ratio, sig_y_ratio, sig_w_ratio, sig_h_ratio }]
+ * signedApprovers: [{ signature_image_path, signed_at, sig_page_index, sig_x_ratio, sig_y_ratio, sig_w_ratio, sig_h_ratio }]
  * getSignatureUrl: (storagePath) => publicUrl string (bucket esign-signatures)
  */
 async function stampApproversAtBoxPositions(mergedDoc, signedApprovers, getSignatureUrl) {
-  for (const a of signedApprovers) {
-    if (a.sig_page_index === null || a.sig_page_index === undefined) continue;
-    if (a.sig_page_index >= mergedDoc.getPageCount()) continue;
+  const { rgb } = PDFLib;
+  const withPlacement = signedApprovers.filter(
+    (a) => a.sig_page_index !== null && a.sig_page_index !== undefined && a.sig_page_index < mergedDoc.getPageCount()
+  );
+  if (!withPlacement.length) return;
 
+  mergedDoc.registerFontkit(window.fontkit);
+  const thaiFontBytes = await fetchArrayBuffer(THAI_FONT_PATH);
+  const thaiFont = await mergedDoc.embedFont(thaiFontBytes, { subset: true });
+
+  for (const a of withPlacement) {
     const page = mergedDoc.getPage(a.sig_page_index);
     const pageWidth = page.getWidth();
     const pageHeight = page.getHeight();
@@ -145,14 +153,32 @@ async function stampApproversAtBoxPositions(mergedDoc, signedApprovers, getSigna
     const boxHeight = a.sig_h_ratio * pageHeight;
     const boxBottom = pageHeight * (1 - a.sig_y_ratio - a.sig_h_ratio);
 
+    // กันที่ด้านล่างกรอบไว้ 1 บรรทัดสำหรับ timestamp เสมอ ที่เหลือค่อยเป็นลายเซ็น
+    const timestampFontSize = Math.max(6, Math.min(9, boxWidth / 22));
+    const timestampLineHeight = timestampFontSize + 4;
+    const sigMaxHeight = Math.max(boxHeight - timestampLineHeight, boxHeight * 0.5);
+
     const sigBytes = await fetchArrayBuffer(getSignatureUrl(a.signature_image_path));
     const sigImage = await mergedDoc.embedPng(sigBytes);
-    const scaled = sigImage.scaleToFit(boxWidth, boxHeight);
+    const scaled = sigImage.scaleToFit(boxWidth, sigMaxHeight);
+    const sigY = boxBottom + timestampLineHeight + (sigMaxHeight - scaled.height) / 2;
     page.drawImage(sigImage, {
       x: boxLeft + (boxWidth - scaled.width) / 2,
-      y: boxBottom + (boxHeight - scaled.height) / 2,
+      y: sigY,
       width: scaled.width,
       height: scaled.height,
     });
+
+    if (a.signed_at) {
+      const timestampText = formatThaiDateTime(a.signed_at);
+      const textWidth = thaiFont.widthOfTextAtSize(timestampText, timestampFontSize);
+      page.drawText(timestampText, {
+        x: boxLeft + Math.max(0, (boxWidth - textWidth) / 2),
+        y: boxBottom + (timestampLineHeight - timestampFontSize) / 2,
+        font: thaiFont,
+        size: timestampFontSize,
+        color: rgb(0.35, 0.4, 0.47),
+      });
+    }
   }
 }
