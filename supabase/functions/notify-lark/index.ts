@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
       (requesterName ? `ผู้เบิก: ${requesterName}\n` : "") +
       `เปิดดูและเซ็นเอกสารได้ที่ลิงก์นี้:\n${signLink}`;
 
-    const sendRes = await fetch("https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=open_id", {
+    const sendRes = await fetch("https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=email", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({

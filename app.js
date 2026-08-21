@@ -641,7 +641,7 @@ async function loadRosterTable() {
   }
   const table = document.createElement("table");
   table.className = "roster-table";
-  table.innerHTML = "<thead><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>Lark user ID</th><th>สถานะ</th><th></th></tr></thead>";
+  table.innerHTML = "<thead><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>อีเมล Lark</th><th>สถานะ</th><th></th></tr></thead>";
   const tbody = document.createElement("tbody");
   rosterAllCache.forEach((a) => {
     const tr = document.createElement("tr");
@@ -653,9 +653,9 @@ async function loadRosterTable() {
     const larkCell = tr.children[2];
     larkCell.style.cssText = "display:flex; gap:6px; align-items:center;";
     const larkInput = document.createElement("input");
-    larkInput.type = "text";
+    larkInput.type = "email";
     larkInput.value = a.lark_user_id || "";
-    larkInput.placeholder = "ou_...";
+    larkInput.placeholder = "อีเมล Lark";
     larkInput.style.cssText = "font-size:12px; padding:6px 8px;";
     const larkSaveBtn = document.createElement("button");
     larkSaveBtn.className = "btn-ghost";
