@@ -117,21 +117,7 @@ async function renderSignScreen() {
 
   const fileListEl = document.getElementById("sign-file-list");
   fileListEl.innerHTML = "";
-  [...requestRow.request_files]
-    .sort((a, b) => a.sort_order - b.sort_order)
-    .forEach((f) => {
-      const url = filesPublicUrl(f.storage_path);
-      const block = document.createElement("div");
-      block.className = "pdf-preview-block";
-      block.innerHTML = `
-        <div class="pdf-preview-header">
-          <span>📄 ${f.file_name}</span>
-          <a href="${url}" target="_blank">เปิดเต็มจอ ↗</a>
-        </div>
-        <iframe class="pdf-preview-frame" src="${url}" title="${f.file_name}"></iframe>
-      `;
-      fileListEl.appendChild(block);
-    });
+  renderGroupedFileList(fileListEl, requestRow.request_files, filesPublicUrl);
 
   const total = requestRow.request_approvers.length;
   const signed = requestRow.request_approvers.filter((a) => a.status === "signed").length;

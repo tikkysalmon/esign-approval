@@ -18,6 +18,48 @@ function formatThaiDateTime(iso) {
 }
 
 /**
+ * แสดงรายการไฟล์ PDF ที่แนบมา โดยจัดกลุ่มไฟล์ที่มี group_label เดียวกันไว้ด้วยกัน
+ * (เช่น "PO #1" คู่กับใบเสนอราคาที่เกี่ยวข้อง) มีหัวข้อคั่นแต่ละกลุ่ม ไฟล์ที่ไม่มี
+ * ป้ายกำกับจะแสดงเดี่ยวๆ ตามลำดับปกติ ไม่มีหัวข้อ — ใช้ทั้งฝั่งพนักงานและผู้บริหาร
+ *
+ * containerEl: element ที่จะใส่รายการไฟล์ลงไป (ต้องเคลียร์ innerHTML เองก่อนเรียก)
+ * files: [{ id, file_name, storage_path, sort_order, group_label }]
+ * getFileUrl: (storage_path) => publicUrl
+ */
+function renderGroupedFileList(containerEl, files, getFileUrl) {
+  const sorted = [...files].sort((a, b) => a.sort_order - b.sort_order);
+  const groups = new Map(); // key -> { label: string|null, files: [] }
+  sorted.forEach((f) => {
+    const label = f.group_label && f.group_label.trim() ? f.group_label.trim() : null;
+    const key = label || `__single_${f.id}`;
+    if (!groups.has(key)) groups.set(key, { label, files: [] });
+    groups.get(key).files.push(f);
+  });
+
+  groups.forEach((group) => {
+    if (group.label) {
+      const heading = document.createElement("div");
+      heading.style.cssText = "margin:14px 0 6px; font-weight:600; color:var(--text); font-size:14px;";
+      heading.textContent = `📁 ${group.label}`;
+      containerEl.appendChild(heading);
+    }
+    group.files.forEach((f) => {
+      const url = getFileUrl(f.storage_path);
+      const block = document.createElement("div");
+      block.className = "pdf-preview-block";
+      block.innerHTML = `
+        <div class="pdf-preview-header">
+          <span>📄 ${f.file_name}</span>
+          <a href="${url}" target="_blank">เปิดเต็มจอ ↗</a>
+        </div>
+        <iframe class="pdf-preview-frame" src="${url}" title="${f.file_name}"></iframe>
+      `;
+      containerEl.appendChild(block);
+    });
+  });
+}
+
+/**
  * request: { title, request_type, expense_subtype, description, amount }
  * files: [{ file_name, storage_path, sort_order }]  (ไฟล์ PDF ต้นฉบับ เรียงตาม sort_order — อยู่ใน bucket esign-files)
  * signedApprovers: [{ approver_name, approver_position, signature_image_path, signed_at }]

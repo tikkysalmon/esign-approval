@@ -12,6 +12,7 @@ const sb = window.supabase.createClient(
 const FILES_BUCKET = "esign-files";
 
 let selectedFiles = []; // File[]
+let selectedFileLabels = []; // string[] — ป้ายกำกับต่อไฟล์ ตำแหน่งตรงกับ selectedFiles (ว่างได้ ไม่บังคับ)
 let expenseItems = []; // [{ description, amount }]
 let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบแล้ว) หรือ null
 let selectedApproverIds = new Set();
@@ -331,7 +332,10 @@ function addFiles(fileList) {
   Array.from(fileList).forEach((f) => {
     if (f.type !== "application/pdf" && !f.name.toLowerCase().endsWith(".pdf")) return;
     const exists = selectedFiles.some((sf) => sf.name === f.name && sf.size === f.size);
-    if (!exists) selectedFiles.push(f);
+    if (!exists) {
+      selectedFiles.push(f);
+      selectedFileLabels.push("");
+    }
   });
   renderFileList();
   refreshSigPlacementUI();
@@ -340,14 +344,34 @@ function addFiles(fileList) {
 function renderFileList() {
   const el = document.getElementById("file-list");
   el.innerHTML = "";
+  if (selectedFiles.length > 1) {
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.style.marginBottom = "6px";
+    hint.textContent = "ถ้ามีหลายชุดปนกัน (เช่น ใบเสนอราคา + PO หลายใบ) ใส่ป้ายกำกับให้ไฟล์ที่เป็นชุดเดียวกัน ระบบจะจัดกลุ่มแสดงให้ผู้บริหารดูง่ายขึ้น";
+    el.appendChild(hint);
+  }
   selectedFiles.forEach((f, idx) => {
     const row = document.createElement("div");
     row.className = "file-row";
+    row.style.flexWrap = "wrap";
     row.innerHTML =
       `<span>📄 ${f.name} (${(f.size / 1024).toFixed(0)} KB)</span>` +
       `<button class="btn-ghost" type="button" data-idx="${idx}">ลบ</button>`;
+    if (selectedFiles.length > 1) {
+      const labelInput = document.createElement("input");
+      labelInput.type = "text";
+      labelInput.placeholder = "ป้ายกำกับชุด (ถ้ามี) เช่น PO #1";
+      labelInput.value = selectedFileLabels[idx] || "";
+      labelInput.style.cssText = "width:100%; margin-top:6px; font-size:13px; padding:6px 10px;";
+      labelInput.addEventListener("input", (e) => {
+        selectedFileLabels[idx] = e.target.value;
+      });
+      row.appendChild(labelInput);
+    }
     row.querySelector("button").addEventListener("click", () => {
       selectedFiles.splice(idx, 1);
+      selectedFileLabels.splice(idx, 1);
       renderFileList();
       refreshSigPlacementUI();
     });
@@ -486,6 +510,7 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         file_name: f.name,
         storage_path: path,
         sort_order: sortOrder++,
+        group_label: selectedFileLabels[i] ? selectedFileLabels[i].trim() || null : null,
       });
       if (fileRowErr) throw fileRowErr;
     }
@@ -591,6 +616,7 @@ function resetNewRequestForm() {
   document.getElementById("expense-items-block").style.display = "none";
   document.getElementById("amount-block").style.display = "block";
   selectedFiles = [];
+  selectedFileLabels = [];
   renderFileList();
   expenseItems = [{ description: "", amount: "" }];
   renderExpenseItems();
@@ -667,12 +693,23 @@ function renderRequestDetail(detail, req, isApproved) {
 
   if (req.request_files.length) {
     html += `<div class="hint" style="margin-bottom:6px;">ไฟล์แนบ:</div>`;
-    req.request_files
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .forEach((f) => {
+    const sortedFiles = [...req.request_files].sort((a, b) => a.sort_order - b.sort_order);
+    const groups = new Map();
+    sortedFiles.forEach((f) => {
+      const label = f.group_label && f.group_label.trim() ? f.group_label.trim() : null;
+      const key = label || `__single_${f.id}`;
+      if (!groups.has(key)) groups.set(key, { label, files: [] });
+      groups.get(key).files.push(f);
+    });
+    groups.forEach((group) => {
+      if (group.label) {
+        html += `<div style="font-weight:600; font-size:13px; margin:8px 0 2px;">📁 ${group.label}</div>`;
+      }
+      group.files.forEach((f) => {
         const { data } = sb.storage.from(FILES_BUCKET).getPublicUrl(f.storage_path);
         html += `<div class="file-row"><span>📄 ${f.file_name}</span><a href="${data.publicUrl}" target="_blank" class="btn-ghost" style="text-decoration:none; padding:4px 10px;">เปิดดู</a></div>`;
       });
+    });
   }
 
   html += `<div class="hint" style="margin:12px 0 4px;">ผู้อนุมัติ:</div>`;
