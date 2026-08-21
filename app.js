@@ -10,11 +10,14 @@ const sb = window.supabase.createClient(
 );
 
 const FILES_BUCKET = "esign-files";
+const SIGNATURES_BUCKET = "esign-signatures";
 
 let selectedFiles = []; // File[]
 let selectedFileLabels = []; // string[] — ป้ายกำกับต่อไฟล์ ตำแหน่งตรงกับ selectedFiles (ว่างได้ ไม่บังคับ)
 let expenseItems = []; // [{ description, amount }]
-let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบแล้ว) หรือ null
+let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบแล้ว) หรือ null — ผู้เบิก (ค่าใช้จ่าย)
+let preparerSignatureBlob = null; // ผู้จัดทำ (เอกสารอื่นๆ)
+let reviewerSignatureBlob = null; // ผู้ตรวจสอบ (เอกสารอื่นๆ)
 let selectedApproverIds = new Set();
 let rosterCache = []; // approvers_roster rows (active only, for select)
 let rosterAllCache = []; // approvers_roster rows (all, for management table)
@@ -117,6 +120,7 @@ setupPillGroup("request-type-group", (input) => {
   document.getElementById("expense-subtype-block").style.display = isExpense ? "block" : "none";
   document.getElementById("expense-items-block").style.display = isExpense ? "block" : "none";
   document.getElementById("amount-block").style.display = isExpense ? "none" : "block";
+  document.getElementById("fixed-sig-block").style.display = isExpense ? "none" : "block";
   if (isExpense && !expenseItems.length) addExpenseItemRow();
   refreshSigPlacementUI();
 });
@@ -219,29 +223,36 @@ function renderSigFileJumpButtons() {
   }
 }
 
+function makeSigTabChip(wrap, key, label, detectText) {
+  if (!sigBoxEditor) return;
+  const placed = sigBoxEditor.getPlacements(key) !== null;
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "checkbox-pill" + (placed ? " selected" : "");
+  chip.textContent = (placed ? "✓ " : "") + label;
+  chip.addEventListener("click", () => {
+    sigPlacementRefreshChain = sigPlacementRefreshChain
+      .then(() => sigBoxEditor.selectApprover(key, label, detectText))
+      .then(() => {
+        activeSigApproverId = key;
+        activeSigApproverName = label;
+        renderSigApproverTabs();
+        updateApplyAllButton();
+      })
+      .catch((err) => console.error("selectApprover failed:", err));
+  });
+  wrap.appendChild(chip);
+}
+
 function renderSigApproverTabs() {
   const wrap = document.getElementById("req-sig-approver-tabs");
   wrap.innerHTML = "";
+  if (preparerSignatureBlob) makeSigTabChip(wrap, "__preparer", "🖊️ ผู้จัดทำ", "ผู้จัดทำ");
+  if (reviewerSignatureBlob) makeSigTabChip(wrap, "__reviewer", "🖊️ ผู้ตรวจสอบ", "ผู้ตรวจสอบ");
   [...selectedApproverIds].forEach((id) => {
     const approver = rosterCache.find((a) => a.id === id);
     if (!approver || !sigBoxEditor) return;
-    const placed = sigBoxEditor.getPlacements(id) !== null;
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "checkbox-pill" + (placed ? " selected" : "");
-    chip.textContent = (placed ? "✓ " : "") + approver.name;
-    chip.addEventListener("click", () => {
-      sigPlacementRefreshChain = sigPlacementRefreshChain
-        .then(() => sigBoxEditor.selectApprover(id, approver.name))
-        .then(() => {
-          activeSigApproverId = id;
-          activeSigApproverName = approver.name;
-          renderSigApproverTabs();
-          updateApplyAllButton();
-        })
-        .catch((err) => console.error("selectApprover failed:", err));
-    });
-    wrap.appendChild(chip);
+    makeSigTabChip(wrap, id, approver.name, "ผู้อนุมัติ");
   });
 }
 
@@ -288,21 +299,10 @@ function updateExpenseItemsTotal() {
 
 document.getElementById("add-item-row-btn").addEventListener("click", addExpenseItemRow);
 
-// ---------- ฟอร์มสร้างคำขอ: ลายเซ็นผู้เบิก (รูปภาพ ลบพื้นหลังอัตโนมัติ) ----------
+// ---------- ฟอร์มสร้างคำขอ: ลายเซ็นแบบแนบรูป (ลบพื้นหลังอัตโนมัติ) — ใช้ร่วมกัน ----------
+// ผู้เบิก (ค่าใช้จ่าย), ผู้จัดทำ/ผู้ตรวจสอบ (เอกสารอื่นๆ)
 
-const reqSigDrop = document.getElementById("req-sig-drop");
-const reqSigInput = document.getElementById("req-sig-input");
-
-reqSigDrop.addEventListener("click", () => reqSigInput.click());
-
-reqSigInput.addEventListener("change", async () => {
-  const file = reqSigInput.files[0];
-  reqSigInput.value = "";
-  if (!file) return;
-  await processRequesterSignatureImage(file);
-});
-
-async function processRequesterSignatureImage(file) {
+async function processSignatureImageToCanvas(file, canvas) {
   const img = await new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
@@ -310,7 +310,6 @@ async function processRequesterSignatureImage(file) {
     image.src = URL.createObjectURL(file);
   });
 
-  const canvas = document.getElementById("req-sig-preview");
   const maxDim = 500;
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
   canvas.width = img.width * scale;
@@ -330,13 +329,59 @@ async function processRequesterSignatureImage(file) {
   }
   ctx.putImageData(imageData, 0, 0);
 
-  requesterSignatureBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-  document.getElementById("req-sig-preview-wrap").style.display = "block";
+  return await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 }
 
-document.getElementById("req-sig-clear-btn").addEventListener("click", () => {
-  requesterSignatureBlob = null;
-  document.getElementById("req-sig-preview-wrap").style.display = "none";
+function wireSignatureImageUpload({ dropId, inputId, canvasId, previewWrapId, clearBtnId, onChange }) {
+  const drop = document.getElementById(dropId);
+  const input = document.getElementById(inputId);
+  drop.addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const file = input.files[0];
+    input.value = "";
+    if (!file) return;
+    const canvas = document.getElementById(canvasId);
+    const blob = await processSignatureImageToCanvas(file, canvas);
+    document.getElementById(previewWrapId).style.display = "block";
+    onChange(blob);
+  });
+  document.getElementById(clearBtnId).addEventListener("click", () => {
+    document.getElementById(previewWrapId).style.display = "none";
+    onChange(null);
+  });
+}
+
+wireSignatureImageUpload({
+  dropId: "req-sig-drop",
+  inputId: "req-sig-input",
+  canvasId: "req-sig-preview",
+  previewWrapId: "req-sig-preview-wrap",
+  clearBtnId: "req-sig-clear-btn",
+  onChange: (blob) => (requesterSignatureBlob = blob),
+});
+
+wireSignatureImageUpload({
+  dropId: "preparer-sig-drop",
+  inputId: "preparer-sig-input",
+  canvasId: "preparer-sig-preview",
+  previewWrapId: "preparer-sig-preview-wrap",
+  clearBtnId: "preparer-sig-clear-btn",
+  onChange: (blob) => {
+    preparerSignatureBlob = blob;
+    refreshSigPlacementUI();
+  },
+});
+
+wireSignatureImageUpload({
+  dropId: "reviewer-sig-drop",
+  inputId: "reviewer-sig-input",
+  canvasId: "reviewer-sig-preview",
+  previewWrapId: "reviewer-sig-preview-wrap",
+  clearBtnId: "reviewer-sig-clear-btn",
+  onChange: (blob) => {
+    reviewerSignatureBlob = blob;
+    refreshSigPlacementUI();
+  },
 });
 
 // ---------- ฟอร์มสร้างคำขอ: แนบไฟล์ PDF ----------
@@ -480,6 +525,12 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
   if (!isExpense && sigBoxEditor) {
     const missing = [...selectedApproverIds].filter((id) => !sigBoxEditor.getPlacements(id));
     if (missing.length) return showNewRequestError("กรุณาวางตำแหน่งลายเซ็นให้ครบทุกคนที่เลือกไว้ก่อนส่งคำขอ");
+    if (preparerSignatureBlob && !sigBoxEditor.getPlacements("__preparer")) {
+      return showNewRequestError("กรุณาวางตำแหน่งลายเซ็นผู้จัดทำก่อนส่งคำขอ (คลิกที่แท็บ 🖊️ ผู้จัดทำ)");
+    }
+    if (reviewerSignatureBlob && !sigBoxEditor.getPlacements("__reviewer")) {
+      return showNewRequestError("กรุณาวางตำแหน่งลายเซ็นผู้ตรวจสอบก่อนส่งคำขอ (คลิกที่แท็บ 🖊️ ผู้ตรวจสอบ)");
+    }
   }
 
   const btn = document.getElementById("submit-request-btn");
@@ -545,6 +596,30 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         group_label: selectedFileLabels[i] ? selectedFileLabels[i].trim() || null : null,
       });
       if (fileRowErr) throw fileRowErr;
+    }
+
+    if (!isExpense && (preparerSignatureBlob || reviewerSignatureBlob)) {
+      const fixedSigUpdate = {};
+      if (preparerSignatureBlob) {
+        const path = `${requestId}/preparer_${Date.now()}.png`;
+        const { error: upErr } = await sb.storage.from(SIGNATURES_BUCKET).upload(path, preparerSignatureBlob, {
+          contentType: "image/png",
+        });
+        if (upErr) throw upErr;
+        fixedSigUpdate.preparer_signature_path = path;
+        fixedSigUpdate.preparer_sig_boxes = sigBoxEditor.getPlacements("__preparer") || [];
+      }
+      if (reviewerSignatureBlob) {
+        const path = `${requestId}/reviewer_${Date.now()}.png`;
+        const { error: upErr } = await sb.storage.from(SIGNATURES_BUCKET).upload(path, reviewerSignatureBlob, {
+          contentType: "image/png",
+        });
+        if (upErr) throw upErr;
+        fixedSigUpdate.reviewer_signature_path = path;
+        fixedSigUpdate.reviewer_sig_boxes = sigBoxEditor.getPlacements("__reviewer") || [];
+      }
+      const { error: fixedSigErr } = await sb.from("requests").update(fixedSigUpdate).eq("id", requestId);
+      if (fixedSigErr) throw fixedSigErr;
     }
 
     const links = [];
@@ -654,6 +729,10 @@ function resetNewRequestForm() {
   renderExpenseItems();
   requesterSignatureBlob = null;
   document.getElementById("req-sig-preview-wrap").style.display = "none";
+  preparerSignatureBlob = null;
+  document.getElementById("preparer-sig-preview-wrap").style.display = "none";
+  reviewerSignatureBlob = null;
+  document.getElementById("reviewer-sig-preview-wrap").style.display = "none";
   sigBoxEditor = null;
   sigBoxEditorFilesKey = "";
   activeSigApproverId = null;

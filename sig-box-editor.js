@@ -66,18 +66,23 @@ export async function createSigBoxEditor(fileEls, boxEls, localFiles) {
     applyBoxStyle();
   });
 
-  async function selectApprover(key, label) {
+  async function selectApprover(key, label, detectText) {
     activeKey = key;
     if (!placementsByApprover.has(key)) {
       const list = [];
       for (let fileIndex = 0; fileIndex < viewer.getFileCount(); fileIndex++) {
+        const pageIndex = viewer.getLastPageIndexOfFile(fileIndex);
+        // ลองหาป้ายกำกับ (เช่น "ผู้อนุมัติ") ในเอกสารก่อน ถ้าเจอใช้ตำแหน่งเหนือป้าย
+        // นั้นเป็นค่าเริ่มต้นเลย แม่นกว่าเดากลางหน้า — ถ้าไม่เจอค่อย fallback
+        const detected = detectText ? await viewer.findTextAnchorOnPage(pageIndex, detectText) : null;
+        const ratio = detected || DEFAULT_RATIO;
         list.push({
           fileIndex,
-          pageIndex: viewer.getLastPageIndexOfFile(fileIndex),
-          xRatio: DEFAULT_RATIO.xRatio,
-          yRatio: DEFAULT_RATIO.yRatio,
-          wRatio: DEFAULT_RATIO.wRatio,
-          hRatio: DEFAULT_RATIO.hRatio,
+          pageIndex,
+          xRatio: ratio.xRatio,
+          yRatio: ratio.yRatio,
+          wRatio: ratio.wRatio,
+          hRatio: ratio.hRatio,
           previewUrl: null,
           label,
         });

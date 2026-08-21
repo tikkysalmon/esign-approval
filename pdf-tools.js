@@ -166,6 +166,42 @@ async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, get
 }
 
 /**
+ * ประทับรูปลายเซ็นที่แนบไว้ล่วงหน้า (เช่น ผู้จัดทำ/ผู้ตรวจสอบ) ลงทุกตำแหน่งกรอบ
+ * ที่กำหนดไว้ — ไม่มี timestamp กำกับ เพราะเป็นการแนบรูปลายเซ็นที่มีอยู่แล้ว
+ * ไม่ใช่การเซ็นสดผ่านระบบ (ต่างจากผู้อนุมัติที่เซ็นผ่าน sign.html)
+ *
+ * mergedDoc: PDFDocument (จาก PDFLib.PDFDocument.load ของไฟล์ที่ merge แล้ว)
+ * signatureImagePath: storage path ของรูปลายเซ็น (bucket esign-signatures) หรือ null
+ * sigBoxes: [{ pageIndex, xRatio, yRatio, wRatio, hRatio }, ...]
+ * getSignatureUrl: (storagePath) => publicUrl string (bucket esign-signatures)
+ */
+async function stampFixedSignature(mergedDoc, signatureImagePath, sigBoxes, getSignatureUrl) {
+  if (!signatureImagePath || !Array.isArray(sigBoxes) || !sigBoxes.length) return;
+  const sigBytes = await fetchArrayBuffer(getSignatureUrl(signatureImagePath));
+  const sigImage = await mergedDoc.embedPng(sigBytes);
+
+  for (const box of sigBoxes) {
+    if (box.pageIndex >= mergedDoc.getPageCount()) continue;
+    const page = mergedDoc.getPage(box.pageIndex);
+    const pageWidth = page.getWidth();
+    const pageHeight = page.getHeight();
+
+    const boxLeft = box.xRatio * pageWidth;
+    const boxWidth = box.wRatio * pageWidth;
+    const boxHeight = box.hRatio * pageHeight;
+    const boxBottom = pageHeight * (1 - box.yRatio - box.hRatio);
+
+    const scaled = sigImage.scaleToFit(boxWidth, boxHeight);
+    page.drawImage(sigImage, {
+      x: boxLeft + (boxWidth - scaled.width) / 2,
+      y: boxBottom + (boxHeight - scaled.height) / 2,
+      width: scaled.width,
+      height: scaled.height,
+    });
+  }
+}
+
+/**
  * ประทับลายเซ็นของผู้อนุมัติแต่ละคนลงบนทุกตำแหน่งกรอบที่แต่ละคนวางไว้เอง พร้อม
  * วันเวลาที่เซ็นอยู่ใต้ลายเซ็นทุกจุด (สำหรับคำขอที่ไม่ใช่ประเภทค่าใช้จ่าย เช่นใบเสนอ
  * ราคา ซึ่งไม่มีเส้นเซ็นตายตัวในเอกสาร) — 1 คนเซ็นครั้งเดียว แต่ลายเซ็นเดียวกันนั้น

@@ -324,10 +324,12 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
       pdfBytes = await mergedDoc.save();
     } else {
       // ประทับลายเซ็นของผู้อนุมัติทุกคนที่เซ็นแล้ว ลงบนตำแหน่งกรอบที่แต่ละคนวางไว้เอง
+      // + ลายเซ็นผู้จัดทำ/ผู้ตรวจสอบ (ถ้าแนบไว้ตอนสร้างคำขอ) ทุกครั้งที่ pdf ถูกสร้างใหม่
       const mergedDoc = await PDFLib.PDFDocument.load(pdfBytes);
-      await stampApproversAtBoxPositions(mergedDoc, signedApprovers, (path) =>
-        getPublicUrl(SIGNATURES_BUCKET, path)
-      );
+      const getSigUrl = (path) => getPublicUrl(SIGNATURES_BUCKET, path);
+      await stampApproversAtBoxPositions(mergedDoc, signedApprovers, getSigUrl);
+      await stampFixedSignature(mergedDoc, requestRow.preparer_signature_path, requestRow.preparer_sig_boxes, getSigUrl);
+      await stampFixedSignature(mergedDoc, requestRow.reviewer_signature_path, requestRow.reviewer_sig_boxes, getSigUrl);
       pdfBytes = await mergedDoc.save();
     }
 

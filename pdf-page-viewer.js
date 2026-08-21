@@ -8,6 +8,62 @@ import * as pdfjsLib from "./lib/pdf.min.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.mjs";
 
+// PDF บางไฟล์ (เช่นที่ export จาก Odoo) เข้ารหัสสระอำแบบแยกส่วน (นิคหิต + สระอา)
+// แทนที่จะเป็นอักขระ "ำ" ตัวเดียว — ต้องแปลงให้ตรงกันก่อนค้นหาข้อความ ไม่งั้นหาไม่เจอ
+function normalizeThai(s) {
+  return s.replace(/ํา/g, "ำ");
+}
+
+/**
+ * ค้นหาข้อความ (เช่น "ผู้อนุมัติ") บนหน้าที่ระบุ แล้วแนะนำตำแหน่งกรอบลายเซ็นที่ควร
+ * วางไว้ "เหนือ" ข้อความนั้น (แบบฟอร์มส่วนใหญ่จะมีเส้นให้เซ็นอยู่เหนือป้ายกำกับ)
+ * คืนค่า { xRatio, yRatio, wRatio, hRatio } หรือ null ถ้าไม่เจอข้อความนั้นในหน้า
+ */
+async function findTextAnchorRatio(pdfDoc, pageNumInFile, searchText) {
+  const page = await pdfDoc.getPage(pageNumInFile);
+  const viewport = page.getViewport({ scale: 1 });
+  const content = await page.getTextContent();
+
+  let normText = "";
+  const ranges = [];
+  for (const item of content.items) {
+    const s = normalizeThai(item.str);
+    const start = normText.length;
+    normText += s;
+    ranges.push({ item, start, end: normText.length });
+  }
+  const target = normalizeThai(searchText);
+  const idx = normText.indexOf(target);
+  if (idx === -1) return null;
+  const range = ranges.find((r) => idx >= r.start && idx < r.end) || ranges.find((r) => idx <= r.start);
+  if (!range) return null;
+
+  const { transform, width: labelWidth, height: labelHeight } = range.item;
+  const labelX = transform[4];
+  const labelY = transform[5]; // พิกัด PDF (จุดกำเนิดล่างซ้าย, y ชี้ขึ้น)
+  const approxLabelHeight = labelHeight || transform[0] || 12;
+
+  const boxWidth = 150;
+  const boxHeight = 42;
+  const gapAboveLabel = 6;
+
+  const boxBottomY = labelY + approxLabelHeight + gapAboveLabel;
+  const boxTopY = boxBottomY + boxHeight;
+  const boxCenterX = labelX + labelWidth / 2;
+  const boxLeftX = boxCenterX - boxWidth / 2;
+
+  const pageWidth = viewport.width;
+  const pageHeight = viewport.height;
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+  return {
+    xRatio: clamp(boxLeftX / pageWidth, 0, 1 - boxWidth / pageWidth),
+    yRatio: clamp((pageHeight - boxTopY) / pageHeight, 0, 1 - boxHeight / pageHeight),
+    wRatio: boxWidth / pageWidth,
+    hRatio: boxHeight / pageHeight,
+  };
+}
+
 /**
  * fileEls: { viewport, canvas, indicator, prevBtn, nextBtn }
  * items: [item, ...] เรียงตามลำดับที่จะรวมไฟล์แล้ว (item คืออะไรก็ได้ ขึ้นกับ getBytes)
@@ -72,5 +128,10 @@ export async function createPdfPageViewer(fileEls, items, getBytes, onPageRender
     getFileCount: () => items.length,
     getLastPageIndexOfFile: (fileIndex) => lastPageIndexPerFile[fileIndex],
     getFileIndexOfPage: (pageIndex) => flatPages[pageIndex]?.fileIndex,
+    findTextAnchorOnPage: (pageIndex, searchText) => {
+      const p = flatPages[pageIndex];
+      if (!p) return Promise.resolve(null);
+      return findTextAnchorRatio(p.pdfDoc, p.pageNumInFile, searchText);
+    },
   };
 }
