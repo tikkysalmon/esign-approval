@@ -118,12 +118,17 @@ async function renderSignScreen() {
   [...requestRow.request_files]
     .sort((a, b) => a.sort_order - b.sort_order)
     .forEach((f) => {
-      const a = document.createElement("a");
-      a.className = "pdf-file-link";
-      a.href = filesPublicUrl(f.storage_path);
-      a.target = "_blank";
-      a.innerHTML = `<span>📄 ${f.file_name}</span><span>เปิดดู →</span>`;
-      fileListEl.appendChild(a);
+      const url = filesPublicUrl(f.storage_path);
+      const block = document.createElement("div");
+      block.className = "pdf-preview-block";
+      block.innerHTML = `
+        <div class="pdf-preview-header">
+          <span>📄 ${f.file_name}</span>
+          <a href="${url}" target="_blank">เปิดเต็มจอ ↗</a>
+        </div>
+        <iframe class="pdf-preview-frame" src="${url}" title="${f.file_name}"></iframe>
+      `;
+      fileListEl.appendChild(block);
     });
 
   const total = requestRow.request_approvers.length;
@@ -277,6 +282,9 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
       signedApprovers,
       getFileUrl: filesPublicUrl,
       getSignatureUrl: (path) => getPublicUrl(SIGNATURES_BUCKET, path),
+      // ฟอร์มใบเบิกเงิน/เงินสดย่อยมีเส้นเซ็น "ผู้อนุมัติ" ในตัวอยู่แล้ว (ประทับด้านล่าง)
+      // ไม่ต้องมีหน้าสรุปแยกซ้ำอีกหน้า
+      skipSummaryPage: requestRow.request_type === "expense",
     });
 
     // สำหรับคำขอค่าใช้จ่าย: ประทับลายเซ็นจริงลงบนเส้น "ผู้อนุมัติ" ของฟอร์ม
@@ -284,7 +292,14 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
     if (requestRow.request_type === "expense") {
       const mergedDoc = await PDFLib.PDFDocument.load(pdfBytes);
       const sigArrayBuffer = await signatureBlob.arrayBuffer();
-      await stampApproverOnExpenseForm(mergedDoc, requestRow.expense_subtype, sigArrayBuffer, signedAt);
+      await stampApproverOnExpenseForm(
+        mergedDoc,
+        requestRow.expense_subtype,
+        sigArrayBuffer,
+        selectedOption.name,
+        selectedOption.position,
+        signedAt
+      );
       pdfBytes = await mergedDoc.save();
     }
 
@@ -303,7 +318,6 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
 
     document.getElementById("success-text").textContent =
       `คุณ (${selectedOption.name}) เซ็นเอกสาร "${requestRow.title}" เรียบร้อยเมื่อ ${formatDateTime(signedAt)}`;
-    document.getElementById("success-download").href = filesPublicUrl(signedPdfPath);
     showScreen("success-screen");
   } catch (err) {
     console.error("confirm-sign failed:", err);

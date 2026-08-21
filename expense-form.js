@@ -32,7 +32,9 @@ const ADVANCE_CARD = {
   toPageY: (fitzY) => 396 - fitzY,
   // ตำแหน่งเส้นเซ็น "ผู้อนุมัติ" (ฝั่งขวา) — ใช้ตอนประทับลายเซ็นจริงลงบนฟอร์ม
   approverSigBox: { x: 390, right: 493, fitzTop: 296, fitzBottom: 342 },
-  approverDate: { maskX: 424, maskWidth: 78, maskFitzTop: 363, maskFitzBottom: 387, textX: 428, textFitzY: 380 },
+  approverInfo: { maskX: 386, maskWidth: 130, maskFitzTop: 366, maskFitzBottom: 390, nameFitzY: 376, tsFitzY: 386 },
+  // ตำแหน่งเส้นเซ็น "ผู้เบิก" (ฝั่งซ้าย) — ใช้ตอนแนบลายเซ็นผู้ขออนุมัติ (ถ้ามี)
+  requesterSigBox: { x: 65, right: 178, fitzTop: 296, fitzBottom: 342 },
 };
 
 // การ์ด "ใบเบิกเงินสดย่อย" ตัดจากครึ่งล่างของแม่แบบ (fitz y เดิม: 396-842.25)
@@ -55,7 +57,9 @@ const PETTY_CASH_CARD = {
   toPageY: (fitzY) => 842.25 - fitzY,
   // ตำแหน่งเส้นเซ็น "ผู้อนุมัติ" (ฝั่งขวา) — ใช้ตอนประทับลายเซ็นจริงลงบนฟอร์ม
   approverSigBox: { x: 390, right: 493, fitzTop: 735, fitzBottom: 781 },
-  approverDate: { maskX: 424, maskWidth: 78, maskFitzTop: 802, maskFitzBottom: 826, textX: 428, textFitzY: 819 },
+  approverInfo: { maskX: 386, maskWidth: 130, maskFitzTop: 805, maskFitzBottom: 829, nameFitzY: 815, tsFitzY: 825 },
+  // ตำแหน่งเส้นเซ็น "ผู้เบิก" (ฝั่งซ้าย) — ใช้ตอนแนบลายเซ็นผู้ขออนุมัติ (ถ้ามี)
+  requesterSigBox: { x: 65, right: 178, fitzTop: 735, fitzBottom: 781 },
 };
 
 function bahtNumber(n) {
@@ -67,9 +71,10 @@ function bahtNumber(n) {
  * requesterName: string
  * dateStr: string (แสดงผลตรงๆ เช่น "20 สิงหาคม 2569")
  * items: [{ description, amount }]
+ * requesterSignaturePngBytes: ArrayBuffer/Uint8Array ของรูปลายเซ็นผู้เบิก (ไม่บังคับ)
  * คืนค่า Uint8Array ของไฟล์ PDF หน้าเดียว
  */
-async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items }) {
+async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items, requesterSignaturePngBytes }) {
   const { PDFDocument, rgb } = PDFLib;
   const card = subtype === "petty_cash" ? PETTY_CASH_CARD : ADVANCE_CARD;
 
@@ -83,6 +88,11 @@ async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items }) {
 
   const page = outDoc.addPage([TEMPLATE_PAGE_WIDTH, card.height]);
   page.drawImage(bgImage, { x: 0, y: 0, width: TEMPLATE_PAGE_WIDTH, height: card.height });
+
+  if (requesterSignaturePngBytes) {
+    const reqSigImage = await outDoc.embedPng(requesterSignaturePngBytes);
+    stampRequesterSignatureOnPage(page, subtype, reqSigImage);
+  }
 
   const drawField = (field, text) => {
     page.drawRectangle({
@@ -129,17 +139,31 @@ async function buildExpenseFormPdf({ subtype, requesterName, dateStr, items }) {
   return await outDoc.save();
 }
 
+function drawSignatureIntoBox(page, sigImage, box, toPageY) {
+  const maxWidth = box.right - box.x;
+  const maxHeight = box.fitzBottom - box.fitzTop;
+  const scaled = sigImage.scaleToFit(maxWidth, maxHeight);
+  const sigYTop = toPageY(box.fitzTop);
+  page.drawImage(sigImage, {
+    x: box.x + (maxWidth - scaled.width) / 2,
+    y: sigYTop - scaled.height,
+    width: scaled.width,
+    height: scaled.height,
+  });
+}
+
 /**
- * ประทับลายเซ็นจริง (ของผู้อนุมัติ) ลงบนเส้น "ผู้อนุมัติ" ของฟอร์มใบเบิกเงิน/
- * ใบเบิกเงินสดย่อยที่สร้างไว้แล้ว — ฟอร์มนี้ต้องเป็นหน้าแรก (page index 0)
- * ของเอกสาร PDF ที่ merge เสร็จแล้ว (เพราะระบบใส่ฟอร์มนี้เป็นไฟล์แรกเสมอ)
+ * ประทับลายเซ็นจริง (ของผู้อนุมัติ) + ชื่อ + ตำแหน่ง + เวลาที่เซ็น ลงบนเส้น
+ * "ผู้อนุมัติ" ของฟอร์มใบเบิกเงิน/ใบเบิกเงินสดย่อยที่สร้างไว้แล้ว — ฟอร์มนี้ต้อง
+ * เป็นหน้าแรก (page index 0) ของเอกสาร PDF ที่ merge เสร็จแล้ว
  *
  * mergedDoc: PDFDocument (จาก PDFLib.PDFDocument.load ของไฟล์ที่ merge แล้ว)
  * subtype: 'advance' | 'petty_cash'
  * sigPngBytes: ArrayBuffer/Uint8Array ของรูปลายเซ็น (PNG)
+ * approverName, approverPosition: ชื่อ-ตำแหน่งผู้อนุมัติ
  * signedAtISO: เวลาที่เซ็น (ISO string)
  */
-async function stampApproverOnExpenseForm(mergedDoc, subtype, sigPngBytes, signedAtISO) {
+async function stampApproverOnExpenseForm(mergedDoc, subtype, sigPngBytes, approverName, approverPosition, signedAtISO) {
   const { rgb } = PDFLib;
   const card = subtype === "petty_cash" ? PETTY_CASH_CARD : ADVANCE_CARD;
 
@@ -149,33 +173,38 @@ async function stampApproverOnExpenseForm(mergedDoc, subtype, sigPngBytes, signe
 
   const page = mergedDoc.getPage(0);
   const sigImage = await mergedDoc.embedPng(sigPngBytes);
+  drawSignatureIntoBox(page, sigImage, card.approverSigBox, card.toPageY);
 
-  const box = card.approverSigBox;
-  const maxWidth = box.right - box.x;
-  const maxHeight = box.fitzBottom - box.fitzTop;
-  const scaled = sigImage.scaleToFit(maxWidth, maxHeight);
-  const sigYTop = card.toPageY(box.fitzTop);
-  page.drawImage(sigImage, {
-    x: box.x + (maxWidth - scaled.width) / 2,
-    y: sigYTop - scaled.height,
-    width: scaled.width,
-    height: scaled.height,
-  });
-
-  const dateField = card.approverDate;
-  const dateText = new Date(signedAtISO).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const info = card.approverInfo;
   page.drawRectangle({
-    x: dateField.maskX,
-    y: card.toPageY(dateField.maskFitzBottom),
-    width: dateField.maskWidth,
-    height: dateField.maskFitzBottom - dateField.maskFitzTop,
+    x: info.maskX,
+    y: card.toPageY(info.maskFitzBottom),
+    width: info.maskWidth,
+    height: info.maskFitzBottom - info.maskFitzTop,
     color: rgb(1, 1, 1),
   });
-  page.drawText(dateText, {
-    x: dateField.textX,
-    y: card.toPageY(dateField.textFitzY),
+  page.drawText(`${approverName} (${approverPosition})`, {
+    x: info.maskX,
+    y: card.toPageY(info.nameFitzY),
     font: thaiFont,
-    size: 10,
+    size: 8.5,
     color: rgb(0.1, 0.15, 0.2),
   });
+  page.drawText(`ลงนามเมื่อ: ${formatThaiDateTime(signedAtISO)}`, {
+    x: info.maskX,
+    y: card.toPageY(info.tsFitzY),
+    font: thaiFont,
+    size: 7.5,
+    color: rgb(0.35, 0.4, 0.47),
+  });
+}
+
+/**
+ * แนบลายเซ็นของผู้เบิก (ผู้ขออนุมัติ) ลงบนเส้น "ผู้เบิก" ของฟอร์มใบเบิกเงิน/
+ * ใบเบิกเงินสดย่อย — เรียกตอนสร้างคำขอ ก่อน merge เข้ากับไฟล์อื่น (ทำงานบน
+ * outDoc ของ buildExpenseFormPdf โดยตรง ก่อน save)
+ */
+function stampRequesterSignatureOnPage(page, subtype, sigImage) {
+  const card = subtype === "petty_cash" ? PETTY_CASH_CARD : ADVANCE_CARD;
+  drawSignatureIntoBox(page, sigImage, card.requesterSigBox, card.toPageY);
 }

@@ -75,6 +75,15 @@
           <div id="expense-items-list"></div>
           <button class="btn-secondary" type="button" id="add-item-row-btn" style="margin-top:8px;">+ เพิ่มรายการ</button>
           <div style="text-align:right; margin-top:10px; font-weight:600;">รวมจำนวนเงิน: <span id="expense-items-total">฿0.00</span></div>
+
+          <label>ลายเซ็นผู้เบิก (ถ้ามี — แนบเป็นรูปภาพ ระบบจะลบพื้นหลังให้อัตโนมัติ)</label>
+          <div class="file-drop" id="req-sig-drop">🖊️ คลิกเพื่อเลือกรูปลายเซ็น (JPG/PNG)</div>
+          <input type="file" id="req-sig-input" accept="image/*" style="display:none;" />
+          <div id="req-sig-preview-wrap" style="display:none; margin-top:10px;">
+            <canvas id="req-sig-preview" style="max-width:220px; border:1px solid var(--border); border-radius:8px; background:
+              repeating-conic-gradient(#eee 0% 25%, #fff 0% 50%) 50% / 14px 14px;"></canvas>
+            <div><button class="btn-ghost" type="button" id="req-sig-clear-btn">ลบรูปลายเซ็น</button></div>
+          </div>
         </div>
 
         <label>แนบไฟล์ PDF เพิ่มเติม (ถ้ามี — เช่นใบเสร็จ, ใบเสนอราคา)</label>
@@ -116,6 +125,8 @@
         <input type="text" id="roster-name" placeholder="เช่น คุณสมชาย ใจดี" />
         <label for="roster-position">ตำแหน่ง</label>
         <input type="text" id="roster-position" placeholder="เช่น กรรมการผู้จัดการ" />
+        <label for="roster-lark-id">Lark user ID (ถ้ามี — ใช้ส่งแจ้งเตือนเข้า Lark chat อัตโนมัติ)</label>
+        <input type="text" id="roster-lark-id" placeholder="เช่น ou_xxxxxxxxxxxxxxxx" />
         <div id="roster-error" class="error-msg" style="display:none;"></div>
         <button class="btn-primary" id="add-roster-btn" style="margin-top:14px;">เพิ่มรายชื่อ</button>
       </div>

@@ -23,9 +23,11 @@ function formatThaiDateTime(iso) {
  * signedApprovers: [{ approver_name, approver_position, signature_image_path, signed_at }]
  * getFileUrl: (storagePath) => publicUrl string (bucket esign-files)
  * getSignatureUrl: (storagePath) => publicUrl string (bucket esign-signatures — คนละ bucket กับไฟล์เอกสาร)
+ * skipSummaryPage: ข้ามหน้าสรุปการอนุมัตินี้ไปเลย — ใช้ตอนเอกสารมีที่เซ็นในตัวอยู่แล้ว
+ *   (เช่นฟอร์มใบเบิกเงิน/เงินสดย่อย ที่ประทับลายเซ็นลงบนฟอร์มโดยตรงแทน ไม่ต้องมีหน้าซ้ำ)
  * คืนค่า: Uint8Array ของไฟล์ PDF ที่รวม+แสตมป์แล้ว
  */
-async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, getSignatureUrl }) {
+async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, getSignatureUrl, skipSummaryPage }) {
   const { PDFDocument, rgb } = PDFLib;
 
   const outDoc = await PDFDocument.create();
@@ -41,6 +43,8 @@ async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, get
     const copiedPages = await outDoc.copyPages(srcDoc, srcDoc.getPageIndices());
     copiedPages.forEach((p) => outDoc.addPage(p));
   }
+
+  if (skipSummaryPage) return await outDoc.save();
 
   const pageWidth = 595.28; // A4
   const pageHeight = 841.89;

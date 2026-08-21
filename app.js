@@ -11,6 +11,7 @@ const FILES_BUCKET = "esign-files";
 
 let selectedFiles = []; // File[]
 let expenseItems = []; // [{ description, amount }]
+let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบแล้ว) หรือ null
 let selectedApproverIds = new Set();
 let rosterCache = []; // approvers_roster rows (active only, for select)
 let rosterAllCache = []; // approvers_roster rows (all, for management table)
@@ -154,6 +155,57 @@ function updateExpenseItemsTotal() {
 }
 
 document.getElementById("add-item-row-btn").addEventListener("click", addExpenseItemRow);
+
+// ---------- ฟอร์มสร้างคำขอ: ลายเซ็นผู้เบิก (รูปภาพ ลบพื้นหลังอัตโนมัติ) ----------
+
+const reqSigDrop = document.getElementById("req-sig-drop");
+const reqSigInput = document.getElementById("req-sig-input");
+
+reqSigDrop.addEventListener("click", () => reqSigInput.click());
+
+reqSigInput.addEventListener("change", async () => {
+  const file = reqSigInput.files[0];
+  reqSigInput.value = "";
+  if (!file) return;
+  await processRequesterSignatureImage(file);
+});
+
+async function processRequesterSignatureImage(file) {
+  const img = await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = URL.createObjectURL(file);
+  });
+
+  const canvas = document.getElementById("req-sig-preview");
+  const maxDim = 500;
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  // ลบพื้นหลังสีอ่อน/สีขาว ให้เหลือแต่เส้นลายเซ็น (ทำให้โปร่งใส)
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const THRESHOLD = 200;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    if (r > THRESHOLD && g > THRESHOLD && b > THRESHOLD) {
+      data[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  requesterSignatureBlob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+  document.getElementById("req-sig-preview-wrap").style.display = "block";
+}
+
+document.getElementById("req-sig-clear-btn").addEventListener("click", () => {
+  requesterSignatureBlob = null;
+  document.getElementById("req-sig-preview-wrap").style.display = "none";
+});
 
 // ---------- ฟอร์มสร้างคำขอ: แนบไฟล์ PDF ----------
 
@@ -300,6 +352,7 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         requesterName,
         dateStr,
         items: cleanItems,
+        requesterSignaturePngBytes: requesterSignatureBlob ? await requesterSignatureBlob.arrayBuffer() : null,
       });
       const formPath = `${requestId}/${Date.now()}_0_${sanitizeForStorageKey(formLabel + ".pdf")}`;
       const { error: formUpErr } = await sb.storage
@@ -344,10 +397,16 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
         .select()
         .single();
       if (apErr) throw apErr;
-      links.push({ name: approver.name, position: approver.position, token: apRow.sign_token });
+      links.push({
+        name: approver.name,
+        position: approver.position,
+        token: apRow.sign_token,
+        larkUserId: approver.lark_user_id || null,
+      });
     }
 
     showResultLinks(links);
+    notifyApproversViaLark(links, title, requesterName);
     resetNewRequestForm();
   } catch (err) {
     showNewRequestError(err.message || "เกิดข้อผิดพลาด กรุณาลองใหม่");
@@ -360,18 +419,48 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
 function showResultLinks(links) {
   const container = document.getElementById("result-links");
   container.innerHTML = "";
-  links.forEach((l) => {
+  links.forEach((l, idx) => {
     const url = signLinkFor(l.token);
     const row = document.createElement("div");
     row.className = "link-row";
+    const larkNote = l.larkUserId ? `<div class="hint" id="lark-status-${idx}">🔔 กำลังส่งแจ้งเตือนเข้า Lark...</div>` : "";
     row.innerHTML =
-      `<div><strong>${l.name}</strong> <span style="color:var(--text-muted); font-size:12px;">(${l.position})</span><br/><span class="link-text">${url}</span></div>` +
+      `<div><strong>${l.name}</strong> <span style="color:var(--text-muted); font-size:12px;">(${l.position})</span><br/><span class="link-text">${url}</span>${larkNote}</div>` +
       `<button class="btn-secondary" type="button">คัดลอกลิงก์</button>`;
     row.querySelector("button").addEventListener("click", (e) => copyToClipboard(url, e.target));
     container.appendChild(row);
   });
   document.querySelector("#tab-new-request .card:first-child").style.display = "none";
   document.getElementById("result-card").style.display = "block";
+}
+
+// ---------- แจ้งเตือนเข้า Lark chat (ถ้าผู้อนุมัติมี lark_user_id ในระบบ) ----------
+
+async function notifyApproversViaLark(links, requestTitle, requesterName) {
+  const projectRef = window.SUPABASE_CONFIG.url.replace(/^https?:\/\//, "").replace(/\.supabase\.co\/?$/, "");
+  const fnUrl = `https://${projectRef}.supabase.co/functions/v1/notify-lark`;
+
+  links.forEach(async (l, idx) => {
+    if (!l.larkUserId) return;
+    const statusEl = document.getElementById(`lark-status-${idx}`);
+    try {
+      const res = await fetch(fnUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: window.SUPABASE_CONFIG.anonKey },
+        body: JSON.stringify({
+          larkUserId: l.larkUserId,
+          requestTitle,
+          requesterName,
+          signLink: signLinkFor(l.token),
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      if (statusEl) statusEl.textContent = "✅ ส่งแจ้งเตือนเข้า Lark แล้ว";
+    } catch (err) {
+      console.warn("notify-lark failed (ระบบแจ้งเตือน Lark อาจยังไม่ได้ตั้งค่า):", err);
+      if (statusEl) statusEl.textContent = "⚠️ ส่งแจ้งเตือน Lark ไม่สำเร็จ — ส่งลิงก์เองแทนได้";
+    }
+  });
 }
 
 document.getElementById("create-another-btn").addEventListener("click", () => {
@@ -395,6 +484,8 @@ function resetNewRequestForm() {
   renderFileList();
   expenseItems = [{ description: "", amount: "" }];
   renderExpenseItems();
+  requesterSignatureBlob = null;
+  document.getElementById("req-sig-preview-wrap").style.display = "none";
   loadApproverSelect();
 }
 
@@ -514,16 +605,18 @@ function showRosterError(msg) {
 document.getElementById("add-roster-btn").addEventListener("click", async () => {
   const name = document.getElementById("roster-name").value.trim();
   const position = document.getElementById("roster-position").value.trim();
+  const larkUserId = document.getElementById("roster-lark-id").value.trim();
   showRosterError("");
   if (!name || !position) return showRosterError("กรอกชื่อและตำแหน่งให้ครบ");
 
   const btn = document.getElementById("add-roster-btn");
   btn.disabled = true;
   try {
-    const { error } = await sb.from("approvers_roster").insert({ name, position });
+    const { error } = await sb.from("approvers_roster").insert({ name, position, lark_user_id: larkUserId || null });
     if (error) throw error;
     document.getElementById("roster-name").value = "";
     document.getElementById("roster-position").value = "";
+    document.getElementById("roster-lark-id").value = "";
     loadRosterTable();
     loadApproverSelect();
   } catch (err) {
@@ -548,14 +641,35 @@ async function loadRosterTable() {
   }
   const table = document.createElement("table");
   table.className = "roster-table";
-  table.innerHTML = "<thead><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>สถานะ</th><th></th></tr></thead>";
+  table.innerHTML = "<thead><tr><th>ชื่อ</th><th>ตำแหน่ง</th><th>Lark user ID</th><th>สถานะ</th><th></th></tr></thead>";
   const tbody = document.createElement("tbody");
   rosterAllCache.forEach((a) => {
     const tr = document.createElement("tr");
     const statusPill = a.active
       ? `<span class="pill pill-approved">ใช้งานอยู่</span>`
       : `<span class="pill" style="background:#eee; color:#888;">ปิดใช้งาน</span>`;
-    tr.innerHTML = `<td>${a.name}</td><td>${a.position}</td><td>${statusPill}</td><td></td>`;
+    tr.innerHTML = `<td>${a.name}</td><td>${a.position}</td><td></td><td>${statusPill}</td><td></td>`;
+
+    const larkCell = tr.children[2];
+    larkCell.style.cssText = "display:flex; gap:6px; align-items:center;";
+    const larkInput = document.createElement("input");
+    larkInput.type = "text";
+    larkInput.value = a.lark_user_id || "";
+    larkInput.placeholder = "ou_...";
+    larkInput.style.cssText = "font-size:12px; padding:6px 8px;";
+    const larkSaveBtn = document.createElement("button");
+    larkSaveBtn.className = "btn-ghost";
+    larkSaveBtn.textContent = "บันทึก";
+    larkSaveBtn.addEventListener("click", async () => {
+      larkSaveBtn.disabled = true;
+      await sb.from("approvers_roster").update({ lark_user_id: larkInput.value.trim() || null }).eq("id", a.id);
+      larkSaveBtn.textContent = "บันทึกแล้ว ✓";
+      setTimeout(() => (larkSaveBtn.textContent = "บันทึก"), 1500);
+      larkSaveBtn.disabled = false;
+    });
+    larkCell.appendChild(larkInput);
+    larkCell.appendChild(larkSaveBtn);
+
     const toggleBtn = document.createElement("button");
     toggleBtn.className = a.active ? "btn-danger" : "btn-secondary";
     toggleBtn.textContent = a.active ? "ปิดใช้งาน" : "เปิดใช้งาน";
