@@ -95,6 +95,25 @@
         <div class="checkbox-group" id="approver-select-group"></div>
         <div class="hint" id="approver-select-hint">ยังไม่มีรายชื่อผู้บริหารในระบบ — ไปที่แท็บ "จัดการผู้บริหาร" เพื่อเพิ่มก่อน</div>
 
+        <div id="req-sig-placement-block" style="display:none;">
+          <label style="margin-top:20px;">วางตำแหน่งลายเซ็นให้แต่ละท่าน</label>
+          <div class="hint">เลือกชื่อผู้อนุมัติด้านล่าง แล้วลากกรอบไปวางตำแหน่งบนเอกสาร (ทำทีละคน — ต้องวางให้ครบทุกคนก่อนส่ง)</div>
+          <div class="checkbox-group" id="req-sig-approver-tabs" style="margin-top:8px;"></div>
+          <div class="sig-page-nav">
+            <button class="btn-ghost" type="button" id="req-sig-page-prev">← หน้าก่อน</button>
+            <span id="req-sig-page-indicator" class="hint">หน้า 1 / 1</span>
+            <button class="btn-ghost" type="button" id="req-sig-page-next">หน้าถัดไป →</button>
+          </div>
+          <div id="req-sig-page-viewport" class="sig-page-viewport">
+            <canvas id="req-sig-page-canvas"></canvas>
+            <div id="req-sig-box" class="sig-box">
+              <div class="sig-box-img" id="req-sig-box-img"></div>
+              <div class="sig-box-label" id="req-sig-box-label">ลายเซ็น</div>
+              <div class="sig-box-resize-handle" id="req-sig-box-resize"></div>
+            </div>
+          </div>
+        </div>
+
         <div id="new-request-error" class="error-msg" style="display:none;"></div>
         <button class="btn-primary" id="submit-request-btn" style="width:100%; margin-top:18px;">ยืนยันสร้างคำขอ</button>
       </div>
@@ -146,6 +165,6 @@
 <script src="config.js"></script>
 <script src="pdf-tools.js"></script>
 <script src="expense-form.js"></script>
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

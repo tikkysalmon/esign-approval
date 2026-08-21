@@ -2,6 +2,8 @@
 // ระบบขออนุมัติเอกสาร — หน้าพนักงาน (index.html)
 // ============================================================
 
+import { createSigBoxEditor } from "./sig-box-editor.js";
+
 const sb = window.supabase.createClient(
   window.SUPABASE_CONFIG.url,
   window.SUPABASE_CONFIG.anonKey
@@ -15,6 +17,8 @@ let requesterSignatureBlob = null; // Blob (PNG, พื้นหลังลบ�
 let selectedApproverIds = new Set();
 let rosterCache = []; // approvers_roster rows (active only, for select)
 let rosterAllCache = []; // approvers_roster rows (all, for management table)
+let sigBoxEditor = null; // handle จาก createSigBoxEditor (สร้างใหม่ทุกครั้งที่ไฟล์แนบเปลี่ยน)
+let sigBoxEditorFilesKey = ""; // เอาไว้เช็คว่าไฟล์แนบเปลี่ยนจริงไหม จะได้ไม่ต้องโหลด pdf.js ซ้ำ
 
 // ---------- ยูทิลิตี้ ----------
 
@@ -110,8 +114,83 @@ setupPillGroup("request-type-group", (input) => {
   document.getElementById("expense-items-block").style.display = isExpense ? "block" : "none";
   document.getElementById("amount-block").style.display = isExpense ? "none" : "block";
   if (isExpense && !expenseItems.length) addExpenseItemRow();
+  refreshSigPlacementUI();
 });
 setupPillGroup("expense-subtype-group");
+
+function getSelectedRequestType() {
+  const input = document.querySelector("#request-type-group input:checked");
+  return input ? input.value : null;
+}
+
+// ---------- ฟอร์มสร้างคำขอ: วางตำแหน่งลายเซ็นแยกต่อผู้อนุมัติ (เฉพาะที่ไม่ใช่ค่าใช้จ่าย) ----------
+
+// เลือกไฟล์/เลือกผู้อนุมัติเร็วๆ ติดกัน อาจเรียก refreshSigPlacementUI ซ้อนกันได้
+// (เช่น pdf.js render หน้าเดิมค้างอยู่ตอนคำขอใหม่มาถึง) ต้องเข้าคิวทีละครั้งเสมอ
+// ไม่งั้น pdf.js จะ error "Cannot use the same canvas during multiple render() operations"
+let sigPlacementRefreshChain = Promise.resolve();
+
+function refreshSigPlacementUI() {
+  sigPlacementRefreshChain = sigPlacementRefreshChain
+    .then(() => refreshSigPlacementUIInner())
+    .catch((err) => console.error("refreshSigPlacementUI failed:", err));
+  return sigPlacementRefreshChain;
+}
+
+async function refreshSigPlacementUIInner() {
+  const block = document.getElementById("req-sig-placement-block");
+  const type = getSelectedRequestType();
+  const eligible = type && type !== "expense" && selectedFiles.length > 0 && selectedApproverIds.size > 0;
+  if (!eligible) {
+    block.style.display = "none";
+    return;
+  }
+  block.style.display = "block";
+
+  const filesKey = selectedFiles.map((f) => f.name + "_" + f.size).join("|");
+  if (!sigBoxEditor || sigBoxEditorFilesKey !== filesKey) {
+    sigBoxEditorFilesKey = filesKey;
+    sigBoxEditor = await createSigBoxEditor(
+      {
+        viewport: document.getElementById("req-sig-page-viewport"),
+        canvas: document.getElementById("req-sig-page-canvas"),
+        indicator: document.getElementById("req-sig-page-indicator"),
+        prevBtn: document.getElementById("req-sig-page-prev"),
+        nextBtn: document.getElementById("req-sig-page-next"),
+      },
+      {
+        box: document.getElementById("req-sig-box"),
+        boxImg: document.getElementById("req-sig-box-img"),
+        boxLabel: document.getElementById("req-sig-box-label"),
+        resizeHandle: document.getElementById("req-sig-box-resize"),
+      },
+      selectedFiles
+    );
+  }
+
+  renderSigApproverTabs();
+}
+
+function renderSigApproverTabs() {
+  const wrap = document.getElementById("req-sig-approver-tabs");
+  wrap.innerHTML = "";
+  [...selectedApproverIds].forEach((id) => {
+    const approver = rosterCache.find((a) => a.id === id);
+    if (!approver || !sigBoxEditor) return;
+    const placed = sigBoxEditor.getPlacement(id) !== null;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "checkbox-pill" + (placed ? " selected" : "");
+    chip.textContent = (placed ? "✓ " : "") + approver.name;
+    chip.addEventListener("click", () => {
+      sigPlacementRefreshChain = sigPlacementRefreshChain
+        .then(() => sigBoxEditor.selectApprover(id, approver.name))
+        .then(() => renderSigApproverTabs())
+        .catch((err) => console.error("selectApprover failed:", err));
+    });
+    wrap.appendChild(chip);
+  });
+}
 
 // ---------- ฟอร์มสร้างคำขอ: รายการเบิก (เฉพาะประเภทค่าใช้จ่าย) ----------
 
@@ -235,6 +314,7 @@ function addFiles(fileList) {
     if (!exists) selectedFiles.push(f);
   });
   renderFileList();
+  refreshSigPlacementUI();
 }
 
 function renderFileList() {
@@ -249,6 +329,7 @@ function renderFileList() {
     row.querySelector("button").addEventListener("click", () => {
       selectedFiles.splice(idx, 1);
       renderFileList();
+      refreshSigPlacementUI();
     });
     el.appendChild(row);
   });
@@ -283,6 +364,7 @@ async function loadApproverSelect() {
       pill.classList.toggle("selected", input.checked);
       if (input.checked) selectedApproverIds.add(a.id);
       else selectedApproverIds.delete(a.id);
+      refreshSigPlacementUI();
     });
     group.appendChild(pill);
   });
@@ -319,6 +401,10 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
   if (isExpense && !cleanItems.length) return showNewRequestError("กรุณากรอกรายการเบิกอย่างน้อย 1 รายการ (มีทั้งรายละเอียดและจำนวนเงิน)");
   if (!isExpense && !selectedFiles.length) return showNewRequestError("กรุณาแนบไฟล์ PDF อย่างน้อย 1 ไฟล์");
   if (!selectedApproverIds.size) return showNewRequestError("กรุณาเลือกผู้บริหารอย่างน้อย 1 คน");
+  if (!isExpense && sigBoxEditor) {
+    const missing = [...selectedApproverIds].filter((id) => !sigBoxEditor.getPlacement(id));
+    if (missing.length) return showNewRequestError("กรุณาวางตำแหน่งลายเซ็นให้ครบทุกคนที่เลือกไว้ก่อนส่งคำขอ");
+  }
 
   const btn = document.getElementById("submit-request-btn");
   btn.disabled = true;
@@ -387,13 +473,22 @@ document.getElementById("submit-request-btn").addEventListener("click", async ()
     const links = [];
     for (const approverId of selectedApproverIds) {
       const approver = rosterCache.find((a) => a.id === approverId);
+      const approverPayload = {
+        request_id: requestId,
+        approver_name: approver.name,
+        approver_position: approver.position,
+      };
+      if (!isExpense && sigBoxEditor) {
+        const placement = sigBoxEditor.getPlacement(approverId);
+        approverPayload.sig_page_index = placement.pageIndex;
+        approverPayload.sig_x_ratio = placement.xRatio;
+        approverPayload.sig_y_ratio = placement.yRatio;
+        approverPayload.sig_w_ratio = placement.wRatio;
+        approverPayload.sig_h_ratio = placement.hRatio;
+      }
       const { data: apRow, error: apErr } = await sb
         .from("request_approvers")
-        .insert({
-          request_id: requestId,
-          approver_name: approver.name,
-          approver_position: approver.position,
-        })
+        .insert(approverPayload)
         .select()
         .single();
       if (apErr) throw apErr;
@@ -486,7 +581,10 @@ function resetNewRequestForm() {
   renderExpenseItems();
   requesterSignatureBlob = null;
   document.getElementById("req-sig-preview-wrap").style.display = "none";
-  loadApproverSelect();
+  sigBoxEditor = null;
+  sigBoxEditorFilesKey = "";
+  document.getElementById("req-sig-placement-block").style.display = "none";
+  loadApproverSelect(); // จะไปเรียก refreshSigPlacementUI ต่อผ่าน selectedApproverIds = new Set()
 }
 
 // ---------- รายการคำขอ ----------

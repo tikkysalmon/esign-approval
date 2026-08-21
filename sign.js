@@ -3,7 +3,7 @@
 // เข้าถึงผ่าน sign.html?token=xxxxx ไม่ต้องล็อกอิน
 // ============================================================
 
-import { initSigBox, setSigBoxPreview, getSigBoxPlacement } from "./sig-box.js";
+import { initSigBox, setSigBoxPreview, hasSigBoxPlacement } from "./sig-box.js";
 
 const sb = window.supabase.createClient(
   window.SUPABASE_CONFIG.url,
@@ -141,11 +141,22 @@ async function renderSignScreen() {
   showScreen("sign-screen");
   setupSignaturePad();
 
-  // คำขอที่ไม่ใช่ประเภทค่าใช้จ่าย ไม่มีเส้นเซ็นตายตัวในเอกสาร ต้องให้ผู้เซ็น
-  // เลือกวางตำแหน่งกรอบลายเซ็นเอง (ลาก/ย่อ/ขยายได้)
+  // คำขอที่ไม่ใช่ประเภทค่าใช้จ่าย ไม่มีเส้นเซ็นตายตัวในเอกสาร — พนักงานวางตำแหน่ง
+  // กรอบลายเซ็นไว้ให้แล้วตั้งแต่ตอนสร้างคำขอ ที่นี่แค่แสดงตำแหน่งนั้นให้ดู (ดูหน้า
+  // อื่นๆ ของเอกสารเพิ่มเติมได้ แต่ลาก/ย่อ-ขยายกรอบไม่ได้แล้ว)
   if (requestRow.request_type !== "expense") {
     document.getElementById("sig-placement-card").style.display = "block";
     const sortedFiles = [...requestRow.request_files].sort((a, b) => a.sort_order - b.sort_order);
+    const placement =
+      approverRow.sig_page_index !== null && approverRow.sig_page_index !== undefined
+        ? {
+            pageIndex: approverRow.sig_page_index,
+            xRatio: approverRow.sig_x_ratio,
+            yRatio: approverRow.sig_y_ratio,
+            wRatio: approverRow.sig_w_ratio,
+            hRatio: approverRow.sig_h_ratio,
+          }
+        : null;
     await initSigBox(
       {
         viewport: document.getElementById("sig-page-viewport"),
@@ -159,8 +170,13 @@ async function renderSignScreen() {
         indicator: document.getElementById("sig-page-indicator"),
       },
       sortedFiles,
-      filesPublicUrl
+      filesPublicUrl,
+      placement
     );
+    if (!hasSigBoxPlacement()) {
+      document.getElementById("sig-placement-hint").textContent =
+        "⚠️ ผู้ขออนุมัติยังไม่ได้วางตำแหน่งลายเซ็นไว้ ลายเซ็นของท่านจะไม่ถูกแนบลงเอกสาร";
+    }
   }
 }
 
@@ -278,6 +294,8 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
     if (upErr) throw upErr;
 
     const signedAt = new Date().toISOString();
+    // ตำแหน่งกรอบลายเซ็น (sig_page_index/x/y/w/h) ผู้ขออนุมัติกำหนดไว้ล่วงหน้า
+    // ตั้งแต่ตอนสร้างคำขอแล้ว ตรงนี้แค่บันทึกว่าเซ็นแล้ว ไม่ต้องเขียนตำแหน่งทับ
     const updatePayload = {
       approver_name: selectedOption.name,
       approver_position: selectedOption.position,
@@ -285,14 +303,6 @@ document.getElementById("confirm-sign-btn").addEventListener("click", async () =
       signature_image_path: sigPath,
       signed_at: signedAt,
     };
-    if (requestRow.request_type !== "expense") {
-      const placement = getSigBoxPlacement();
-      updatePayload.sig_page_index = placement.pageIndex;
-      updatePayload.sig_x_ratio = placement.xRatio;
-      updatePayload.sig_y_ratio = placement.yRatio;
-      updatePayload.sig_w_ratio = placement.wRatio;
-      updatePayload.sig_h_ratio = placement.hRatio;
-    }
     const { error: updErr } = await sb.from("request_approvers").update(updatePayload).eq("id", approverRow.id);
     if (updErr) throw updErr;
 
