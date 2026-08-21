@@ -100,9 +100,11 @@ async function buildSignedPdf({ request, files, signedApprovers, getFileUrl, get
   y -= 30;
 
   const typeLabel =
-    request.request_type === "quotation"
-      ? "ใบเสนอราคา"
-      : "ค่าใช้จ่าย · " + (request.expense_subtype === "petty_cash" ? "เบิกเงินสดย่อย" : "เบิกเงิน");
+    request.request_type === "expense"
+      ? "ค่าใช้จ่าย · " + (request.expense_subtype === "petty_cash" ? "เบิกเงินสดย่อย" : "เบิกเงิน")
+      : request.request_type === "po"
+        ? "ใบสั่งซื้อ (PO)"
+        : "ใบเสนอราคา";
 
   drawText(`เรื่อง: ${request.title}`, { x: margin, y, size: 12 });
   y -= 18;

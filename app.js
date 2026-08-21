@@ -36,6 +36,7 @@ function formatDateTime(iso) {
 
 function requestTypeLabel(req) {
   if (req.request_type === "quotation") return "ใบเสนอราคา";
+  if (req.request_type === "po") return "ใบสั่งซื้อ (PO)";
   if (req.request_type === "expense") {
     return req.expense_subtype === "petty_cash" ? "ค่าใช้จ่าย · เบิกเงินสดย่อย" : "ค่าใช้จ่าย · เบิกเงิน";
   }
